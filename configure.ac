@@ -38,7 +38,6 @@ case "${host_os}" in
         ;;
       *mingw*)
         SYS=mingw32
-        AC_DEFINE([_WIN32_WINNT], 0x0502, [Define to '0x0502' for Windows XP SP2 APIs.])
         AC_DEFINE([_WIN32_IE], 0x0501, [Define to '0x0501' for IE 5.01.])
         CPPFLAGS="${CPPFLAGS} -D__USE_MINGW_ANSI_STDIO=1"
         ;;
@@ -68,6 +67,23 @@ case "${host_os}" in
     SYS="${host_os}"
     ;;
 esac
+
+dnl Only force the _WIN32_WINNT if it's not set or lower than Windows XP SP2
+AS_IF([test "$SYS" = mingw32],[
+    AC_PREPROC_IFELSE([AC_LANG_PROGRAM(
+        [[#ifdef _WIN32_WINNT
+        # error _WIN32_WINNT already defined
+        #else
+        # include <sdkddkver.h>
+        # if defined(_WIN32_WINNT) && _WIN32_WINNT >= 0x0502
+        #  error _WIN32_WINNT toolchain default high enough
+        # endif
+        #endif
+        ]],[[;]])
+    ],[
+        AC_DEFINE([_WIN32_WINNT], [0x0502], [Define to '0x0502' for Windows XP SP2 APIs.])
+    ])
+])
 
 dnl Falsely enables for NetBSD
 dnl warning: warning: reference to obsolete getfsstat(); use getvfsstat()

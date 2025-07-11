@@ -78,8 +78,13 @@ static void *_load_dll(const wchar_t *lib_path, const wchar_t *dll_search_path)
     typedef BOOL(WINAPI *RemoveDllDirectoryF)(PVOID);
     AddDllDirectoryF pAddDllDirectory;
     RemoveDllDirectoryF pRemoveDllDirectory;
+#if _WIN32_WINNT >= _WIN32_WINNT_WIN8 && (WINAPI_FAMILY_PARTITION (WINAPI_PARTITION_DESKTOP) || NTDDI_VERSION >= 0x0A000008) // NTDDI_WIN10_VB
+    pAddDllDirectory = AddDllDirectory;
+    pRemoveDllDirectory = RemoveDllDirectory;
+#else
     pAddDllDirectory = (AddDllDirectoryF)GetProcAddress(GetModuleHandle(TEXT("kernel32.dll")), "AddDllDirectory");
     pRemoveDllDirectory = (RemoveDllDirectoryF)GetProcAddress(GetModuleHandle(TEXT("kernel32.dll")), "RemoveDllDirectory");
+#endif
 
     if (pAddDllDirectory && pRemoveDllDirectory) {
 
@@ -94,10 +99,10 @@ static void *_load_dll(const wchar_t *lib_path, const wchar_t *dll_search_path)
             pRemoveDllDirectory(cookie);
         }
     } else {
-        result = LoadLibraryW(lib_path);
+        result = LoadLibraryExW(lib_path, NULL, LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
         if (!result) {
             SetDllDirectoryW(dll_search_path);
-            result = LoadLibraryW(lib_path);
+            result = LoadLibraryExW(lib_path, NULL, LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
             SetDllDirectoryW(L"");
         }
     }

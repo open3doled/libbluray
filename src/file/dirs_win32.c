@@ -36,6 +36,9 @@
 
 char *win32_get_font_dir(const char *font_file)
 {
+#if !WINAPI_FAMILY_PARTITION (WINAPI_PARTITION_DESKTOP)
+    return NULL;
+#else /* WINAPI_PARTITION_DESKTOP */
     wchar_t wdir[MAX_PATH];
     if (S_OK != SHGetFolderPathW(NULL, CSIDL_FONTS, NULL, SHGFP_TYPE_CURRENT, wdir)) {
         int lenght = GetWindowsDirectoryW(wdir, MAX_PATH);
@@ -58,6 +61,7 @@ char *win32_get_font_dir(const char *font_file)
         strcpy(path + len, font_file);
     }
     return path;
+#endif /* WINAPI_PARTITION_DESKTOP */
 }
 
 char *file_get_config_home(void)
@@ -67,6 +71,7 @@ char *file_get_config_home(void)
 
 char *file_get_data_home(void)
 {
+#if WINAPI_FAMILY_PARTITION (WINAPI_PARTITION_DESKTOP)
     wchar_t wdir[MAX_PATH];
 
     /* Get the "Application Data" folder for the user */
@@ -79,7 +84,7 @@ char *file_get_data_home(void)
         }
         return appdir;
     }
-
+#endif /* WINAPI_PARTITION_DESKTOP */
     BD_DEBUG(DBG_FILE, "Can't find user configuration directory !\n");
     return NULL;
 }
@@ -100,6 +105,7 @@ const char *file_get_config_system(const char *dir)
         if (appdir)
             return appdir;
 
+#if WINAPI_FAMILY_PARTITION (WINAPI_PARTITION_DESKTOP)
         /* Get the "Application Data" folder for all users */
         if (S_OK == SHGetFolderPathW(NULL, CSIDL_COMMON_APPDATA | CSIDL_FLAG_CREATE,
                     NULL, SHGFP_TYPE_CURRENT, wdir)) {
@@ -109,7 +115,9 @@ const char *file_get_config_system(const char *dir)
                 WideCharToMultiByte (CP_UTF8, 0, wdir, -1, appdir, len, NULL, NULL);
             }
             return appdir;
-        } else {
+        } else
+#endif
+        {
             BD_DEBUG(DBG_FILE, "Can't find common configuration directory !\n");
             return NULL;
         }

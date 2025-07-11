@@ -39,7 +39,10 @@
 #endif
 
 #if defined(_WIN32) && defined (HAVE_FT2)
+#include <winapifamily.h>
+#if WINAPI_FAMILY_PARTITION (WINAPI_PARTITION_DESKTOP) // EnumFontFamiliesExW/GetDC is not allowed in UWP
 #define NEED_WIN32_FONTS
+#endif
 #endif
 
 #ifdef NEED_WIN32_FONTS
