@@ -20,7 +20,6 @@
 
 package org.havi.ui;
 
-import java.awt.AWTEvent;
 import java.awt.Component;
 import org.dvb.ui.TestOpacity;
 
@@ -63,12 +62,6 @@ public abstract class HComponent extends Component implements HMatteLayer, TestO
 
     public boolean isEnabled() {
         return super.isEnabled();
-    }
-
-    protected void processEvent(AWTEvent event) {
-        org.videolan.Logger.unimplemented(HComponent.class.getName(), "processEvent");
-
-        super.processEvent(event);
     }
 
     private HMatte matte = null;
