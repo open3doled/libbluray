@@ -253,12 +253,18 @@ public class IndexXmlParser {
         ByteArrayOutputStream buffer = new ByteArrayOutputStream();
         DataOutputStream out = new DataOutputStream(buffer);
         
-        // Header
+        // AppInfoBDMV is 38 bytes (length(4) + reserved(1) + video/frame(1) + reserved(32))
+        // Header ends at offset 40 (0x28), AppInfo is at 40, Indexes start after AppInfo
+        // Maintainer says indexes should be at 0x4e (78) or later
+        int appInfoSize = 38;
+        int indexesStartAddress = 40 + appInfoSize;  // 78 (0x4E)
+        
+        // === Header (40 bytes) ===
         out.writeBytes("INDX");
         out.writeBytes(version);
         
-        // Indexes start address (4 bytes) - offset to indexes section
-        out.writeInt(40);
+        // Indexes start address (4 bytes)
+        out.writeInt(indexesStartAddress);
         
         // Extension data start address (4 bytes) - 0 = no extension
         out.writeInt(0);
@@ -268,15 +274,25 @@ public class IndexXmlParser {
             out.writeByte(0);
         }
         
-        // Indexes section
+        // === AppInfoBDMV (38 bytes) at offset 0x28 ===
+        out.writeInt(34);  // length of AppInfo data (excludes this length field)
+        out.writeByte(0);  // reserved
+        // video_format (4 bits) = 0, frame_rate (4 bits) = 0
+        out.writeByte(0);
+        // reserved (32 bytes) - extra padding to reach 0x4E
+        for (int i = 0; i < 32; i++) {
+            out.writeByte(0);
+        }
+        
+        // === Indexes section (at offset 0x4C) ===
         int indexesStart = buffer.size();
         out.writeInt(0);  // Placeholder for length
         
         // First Playback
-        writeIndexObject(out, firstPlaybackBdjo);
+        writeFirstPlayback(out, firstPlaybackBdjo);
         
         // Top Menu
-        writeIndexObject(out, topMenuBdjo != null ? topMenuBdjo : firstPlaybackBdjo);
+        writeTopMenu(out, topMenuBdjo != null ? topMenuBdjo : firstPlaybackBdjo);
         
         // Number of titles
         int numTitles = (title1Bdjo != null) ? 1 : 0;
@@ -298,39 +314,69 @@ public class IndexXmlParser {
         return data;
     }
     
-    private void writeIndexObject(DataOutputStream out, String bdjoFileName) throws IOException {
-        // Object type (2 bits) = 2 (BD-J), reserved (30 bits)
+    private void writeFirstPlayback(DataOutputStream out, String bdjoFileName) throws IOException {
+        // first_playback_type (2 bits) = 10 (BD-J = type 2)
+        // reserved (30 bits)
         out.writeInt(0x80000000);
         
-        // BD-J object reference
-        // HDMV playback type (2 bits) = 0
+        // bdj_first_playback:
+        // playback_type (2 bits) = 11 (BD-J Interactive) = 0xC000
         // reserved (14 bits)
-        out.writeShort(0);
+        out.writeShort(0xC000);
         
-        // id_ref (16 bits) = BDJO number
-        int bdjoId = parseBdjoId(bdjoFileName);
-        out.writeShort(bdjoId);
+        // name (5 bytes) = BDJO file name (e.g., "00000")
+        writeBdjoName(out, bdjoFileName);
         
-        // Reserved (4 bytes)
-        out.writeInt(0);
+        // Reserved (1 byte)
+        out.writeByte(0);
+    }
+    
+    private void writeTopMenu(DataOutputStream out, String bdjoFileName) throws IOException {
+        // top_menu_type (2 bits) = 10 (BD-J = type 2)
+        // reserved (30 bits)
+        out.writeInt(0x80000000);
+        
+        // bdj_top_menu:
+        // playback_type (2 bits) = 11 (BD-J Interactive) = 0xC000
+        // reserved (14 bits)
+        out.writeShort(0xC000);
+        
+        // name (5 bytes) = BDJO file name (e.g., "00000")
+        writeBdjoName(out, bdjoFileName);
+        
+        // Reserved (1 byte)
+        out.writeByte(0);
     }
     
     private void writeTitle(DataOutputStream out, String bdjoFileName, int accessType) throws IOException {
-        // Object type (2 bits) = 2 (BD-J)
-        // Title access type (2 bits)
+        // object_type (2 bits) = 10 (BD-J = type 2)
+        // title_access_type (2 bits)
         // reserved (28 bits)
-        int header = 0x80000000;  // BD-J object type
-        // Access type goes in bits 29-28
-        // Actually the exact bit positions may vary - using simple approach
+        int header = 0x80000000;  // BD-J object type (10 in top 2 bits = 2)
+        header |= (accessType & 0x03) << 28;  // access type in bits 29-28
         out.writeInt(header);
         
-        // BD-J object reference
-        out.writeShort(0);
-        int bdjoId = parseBdjoId(bdjoFileName);
-        out.writeShort(bdjoId);
+        // bdj_title:
+        // playback_type (2 bits) = 11 (BD-J Interactive) = 0xC000
+        // reserved (14 bits)
+        out.writeShort(0xC000);
         
-        // Reserved (4 bytes)
-        out.writeInt(0);
+        // name (5 bytes) = BDJO file name (e.g., "00000")
+        writeBdjoName(out, bdjoFileName);
+        
+        // Reserved (1 byte)
+        out.writeByte(0);
+    }
+    
+    private void writeBdjoName(DataOutputStream out, String bdjoFileName) throws IOException {
+        // Get the 5-character BDJO name (strip .bdjo extension if present)
+        String name = bdjoFileName;
+        if (name == null) name = "00000";
+        name = name.replace(".bdjo", "");
+        // Pad or truncate to exactly 5 characters
+        while (name.length() < 5) name = "0" + name;
+        if (name.length() > 5) name = name.substring(0, 5);
+        out.writeBytes(name);
     }
     
     private int parseBdjoId(String bdjoFileName) {
