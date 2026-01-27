@@ -10,7 +10,9 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-BDJ_DIR="$(dirname "$SCRIPT_DIR")"
+# Navigate from tests/testdisc to repo root
+REPO_ROOT="$(dirname "$(dirname "$SCRIPT_DIR")")"
+BDJ_DIR="$REPO_ROOT/src/libbluray/bdj"
 JAVA_SRC="$BDJ_DIR/java"
 TEST_SRC="$SCRIPT_DIR/java"
 CONFIG_DIR="$SCRIPT_DIR/config"
@@ -62,9 +64,9 @@ echo "Step 2: Compiling test Xlet..."
 
 LIBBLURAY_JAR=""
 # Try to find libbluray.jar from build directory
-for jar in "$BDJ_DIR/../../../build/src/libbluray/bdj/libbluray-j2se"*.jar \
-           "$BDJ_DIR/../../../build/src/libbluray/bdj/libbluray"*.jar \
-           "$BDJ_DIR/../../.libs/libbluray"*.jar; do
+for jar in "$REPO_ROOT/build/src/libbluray/bdj/libbluray-j2se"*.jar \
+           "$REPO_ROOT/build/src/libbluray/bdj/libbluray"*.jar \
+           "$BDJ_DIR/../.libs/libbluray"*.jar; do
     if [ -f "$jar" ]; then
         LIBBLURAY_JAR="$jar"
         break
