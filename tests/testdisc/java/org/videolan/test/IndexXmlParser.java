@@ -279,12 +279,11 @@ public class IndexXmlParser {
         out.writeByte(0);  // reserved
         // video_format (4 bits) = 0, frame_rate (4 bits) = 0
         out.writeByte(0);
-        // reserved (32 bytes) - extra padding to reach 0x4E
-        for (int i = 0; i < 32; i++) {
-            out.writeByte(0);
-        }
+        // content_provider_data (32 bytes) - descriptive string for identification
+        String contentProviderData = "libbluray test disc-------------";
+        out.writeBytes(contentProviderData);
         
-        // === Indexes section (at offset 0x4C) ===
+        // === Indexes section (at offset 0x4E) ===
         int indexesStart = buffer.size();
         out.writeInt(0);  // Placeholder for length
         
