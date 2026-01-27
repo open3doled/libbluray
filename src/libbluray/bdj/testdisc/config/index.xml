@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  index.bdmv configuration for HAVI Test Disc
+  Uses HD Cookbook XML format (subset - unsupported features will error)
+  
+  Supported features:
+    - BD-J objects for firstPlayback, topMenu, titles
+    - Single title
+    
+  Unsupported (will error if present):
+    - HDMV (movie) objects
+    - Multiple titles
+    - appInfo (video format, frame rate)
+    - extensionData
+-->
+<index>
+    <version>0200</version>
+    
+    <indexes>
+        <firstPlayback>
+            <bdjObject>
+                <bdjoFileName>00000</bdjoFileName>
+            </bdjObject>
+        </firstPlayback>
+        
+        <topMenu>
+            <bdjObject>
+                <bdjoFileName>00000</bdjoFileName>
+            </bdjObject>
+        </topMenu>
+        
+        <titles>
+            <title>
+                <titleAccessType>V_01</titleAccessType>
+                <bdjObject>
+                    <bdjoFileName>00000</bdjoFileName>
+                </bdjObject>
+            </title>
+        </titles>
+    </indexes>
+</index>

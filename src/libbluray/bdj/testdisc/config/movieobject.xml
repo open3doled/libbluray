@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  MovieObject.bdmv configuration for HAVI Test Disc
+  Uses HD Cookbook XML format (subset - unsupported features will error)
+  
+  For BD-J only discs, this file is essentially empty (no movie objects needed).
+  The disc playback is controlled entirely by BD-J applications.
+  
+  Supported features:
+    - Empty movie objects list (BD-J only disc)
+    
+  Unsupported (will error if present):
+    - Movie objects with navigation commands (HDMV programming)
+-->
+<movieObjects>
+    <version>0200</version>
+    <!-- No movie objects needed for BD-J only disc -->
+</movieObjects>
