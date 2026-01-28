@@ -207,13 +207,16 @@ public class HGraphicLook implements HExtendedLook {
 
     public boolean isOpaque(HVisible visible) {
         // Component is opaque if background fill is enabled and has opaque background color
-        if (visible.getBackgroundMode() == HVisible.BACKGROUND_FILL) {
-            Color bg = visible.getBackground();
-            if (bg != null && bg.getAlpha() == 255) {
-                return true;
-            }
+        if (visible.getBackgroundMode() != HVisible.BACKGROUND_FILL) {
+            return false;
         }
-        return false;
+
+        Color bg = visible.getBackground();
+        if ((bg == null) || (bg.getAlpha() < 255)) {
+            return false;
+        }
+
+        return true;
     }
 
     public Insets getInsets(HVisible visible) {
