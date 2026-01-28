@@ -1217,7 +1217,7 @@ const BLURAY_DISC_INFO *bd_get_disc_info(BLURAY *bd)
  * bdj callbacks
  */
 
-void bd_set_bdj_uo_mask(BLURAY *bd, unsigned mask)
+void bdpriv_set_bdj_uo_mask(BLURAY *bd, unsigned mask)
 {
     bd->title_uo_mask.title_search = !!(mask & BDJ_TITLE_SEARCH_MASK);
     bd->title_uo_mask.menu_call    = !!(mask & BDJ_MENU_CALL_MASK);
@@ -1225,7 +1225,7 @@ void bd_set_bdj_uo_mask(BLURAY *bd, unsigned mask)
     _update_uo_mask(bd);
 }
 
-uint64_t bd_get_uo_mask(BLURAY *bd)
+uint64_t bdpriv_get_uo_mask(BLURAY *bd)
 {
     /* internal function. Used by BD-J (and UO masking checks). */
     union {
@@ -1242,15 +1242,15 @@ uint64_t bd_get_uo_mask(BLURAY *bd)
 
 static int _is_uo_masked(BLURAY *bd, bd_uo_mask_index_e mask_index)
 {
-    return (bd->title_type != title_undef) && !!(bd_get_uo_mask(bd) & (1ull << mask_index));
+    return (bd->title_type != title_undef) && !!(bdpriv_get_uo_mask(bd) & (1ull << mask_index));
 }
 
-void bd_set_bdj_kit(BLURAY *bd, int mask)
+void bdpriv_set_bdj_kit(BLURAY *bd, int mask)
 {
     _queue_event(bd, BD_EVENT_KEY_INTEREST_TABLE, mask);
 }
 
-int bd_bdj_sound_effect(BLURAY *bd, int id)
+int bdpriv_sound_effect(BLURAY *bd, int id)
 {
     if (bd->sound_effects && id >= bd->sound_effects->num_sounds) {
         return -1;
@@ -1263,7 +1263,7 @@ int bd_bdj_sound_effect(BLURAY *bd, int id)
     return 0;
 }
 
-void bd_select_rate(BLURAY *bd, float rate, int reason)
+void bdpriv_select_rate(BLURAY *bd, float rate, int reason)
 {
     if (reason == BDJ_PLAYBACK_STOP) {
         /* playback stop. Might want to wait for buffers empty here. */
@@ -1271,7 +1271,7 @@ void bd_select_rate(BLURAY *bd, float rate, int reason)
     }
 
     if (reason == BDJ_PLAYBACK_START) {
-        /* playback is triggered by bd_select_rate() */
+        /* playback is triggered by bdpriv_select_rate() */
         bd->bdj_wait_start = 0;
     }
 
@@ -1280,27 +1280,6 @@ void bd_select_rate(BLURAY *bd, float rate, int reason)
     } else {
         _queue_event(bd, BD_EVENT_STILL, 0);
     }
-}
-
-static int64_t _seek_time(BLURAY *bd, uint64_t tick, uint8_t is_uo_mask_checked);
-
-int bd_bdj_seek(BLURAY *bd, int playitem, int playmark, int64_t time)
-{
-    bd_mutex_lock(&bd->mutex);
-
-    if (playitem > 0) {
-        bd_seek_playitem(bd, playitem);
-    }
-    if (playmark >= 0) {
-        bd_seek_mark(bd, playmark);
-    }
-    if (time >= 0) {
-        _seek_time(bd, time, 0);
-    }
-
-    bd_mutex_unlock(&bd->mutex);
-
-    return 1;
 }
 
 static int _bd_set_virtual_package(BLURAY *bd, const char *vp_path, int psr_init_backup)
@@ -1325,7 +1304,7 @@ static int _bd_set_virtual_package(BLURAY *bd, const char *vp_path, int psr_init
     return 0;
 }
 
-int bd_set_virtual_package(BLURAY *bd, const char *vp_path, int psr_init_backup)
+int bdpriv_set_virtual_package(BLURAY *bd, const char *vp_path, int psr_init_backup)
 {
     int ret;
     bd_mutex_lock(&bd->mutex);
@@ -1334,12 +1313,12 @@ int bd_set_virtual_package(BLURAY *bd, const char *vp_path, int psr_init_backup)
     return ret;
 }
 
-BD_DISC *bd_get_disc(BLURAY *bd)
+BD_DISC *bdpriv_get_disc(BLURAY *bd)
 {
     return bd ? bd->disc : NULL;
 }
 
-uint32_t bd_reg_read(BLURAY *bd, int psr, int reg)
+uint32_t bdpriv_reg_read(BLURAY *bd, int psr, int reg)
 {
     if (psr) {
         return bd_psr_read(bd->regs, reg);
@@ -1348,7 +1327,7 @@ uint32_t bd_reg_read(BLURAY *bd, int psr, int reg)
     }
 }
 
-int bd_reg_write(BLURAY *bd, int psr, int reg, uint32_t value, uint32_t psr_value_mask)
+int bdpriv_reg_write(BLURAY *bd, int psr, int reg, uint32_t value, uint32_t psr_value_mask)
 {
     if (psr) {
         if (psr < 102) {
@@ -1365,13 +1344,13 @@ int bd_reg_write(BLURAY *bd, int psr, int reg, uint32_t value, uint32_t psr_valu
     }
 }
 
-BD_ARGB_BUFFER *bd_lock_osd_buffer(BLURAY *bd)
+BD_ARGB_BUFFER *bdpriv_lock_osd_buffer(BLURAY *bd)
 {
     bd_mutex_lock(&bd->argb_buffer_mutex);
     return bd->argb_buffer;
 }
 
-void bd_unlock_osd_buffer(BLURAY *bd)
+void bdpriv_unlock_osd_buffer(BLURAY *bd)
 {
     bd_mutex_unlock(&bd->argb_buffer_mutex);
 }
@@ -1379,7 +1358,7 @@ void bd_unlock_osd_buffer(BLURAY *bd)
 /*
  * handle graphics updates from BD-J layer
  */
-void bd_bdj_osd_cb(BLURAY *bd, const unsigned *img, int w, int h,
+void bdpriv_bdj_osd_cb(BLURAY *bd, const unsigned *img, int w, int h,
                    int x0, int y0, int x1, int y1)
 {
     BD_ARGB_OVERLAY aov;
@@ -2595,6 +2574,26 @@ int bd_select_playlist(BLURAY *bd, uint32_t playlist)
 }
 
 /* BD-J callback */
+int bdpriv_seek(BLURAY *bd, int playitem, int playmark, int64_t time)
+{
+    bd_mutex_lock(&bd->mutex);
+
+    if (playitem > 0) {
+        bd_seek_playitem(bd, playitem);
+    }
+    if (playmark >= 0) {
+        bd_seek_mark(bd, playmark);
+    }
+    if (time >= 0) {
+        _seek_time(bd, time, 0);
+    }
+
+    bd_mutex_unlock(&bd->mutex);
+
+    return 1;
+}
+
+/* BD-J callback */
 static int _play_playlist_at(BLURAY *bd, int playlist, int playitem, int playmark, int64_t time)
 {
     if (playlist < 0) {
@@ -2606,15 +2605,15 @@ static int _play_playlist_at(BLURAY *bd, int playlist, int playitem, int playmar
         return 0;
     }
 
-    bd->bdj_wait_start = 1;  /* playback is triggered by bd_select_rate() */
+    bd->bdj_wait_start = 1;  /* playback is triggered by bdpriv_select_rate() */
 
-    bd_bdj_seek(bd, playitem, playmark, time);
+    bdpriv_seek(bd, playitem, playmark, time);
 
     return 1;
 }
 
 /* BD-J callback */
-int bd_play_playlist_at(BLURAY *bd, int playlist, int playitem, int playmark, int64_t time)
+int bdpriv_play_playlist_at(BLURAY *bd, int playlist, int playitem, int playmark, int64_t time)
 {
     int result;
 
@@ -2819,10 +2818,15 @@ static int _copy_streams(const NAV_CLIP *clip, BLURAY_STREAM_INFO **pstreams,
         memcpy(streams[ii].lang, si[ii].lang, 4);
         streams[ii].pid = si[ii].pid;
         streams[ii].aspect = nav_clip_lookup_aspect(clip, si[ii].pid);
-        if ((si->stream_type == 2) || (si->stream_type == 3))
+        if ((si->stream_type == 2) || (si->stream_type == 3) || (si->stream_type == 4)) {
             streams[ii].subpath_id = si->subpath_id;
-        else
+        } else {
             streams[ii].subpath_id = -1;
+        }
+        streams[ii].dynamic_range_type = si[ii].dynamic_range_type;
+        streams[ii].color_space = si[ii].color_space;
+        streams[ii].cr_flag = si[ii].cr_flag;
+        streams[ii].hdr_plus_flag = si[ii].hdr_plus_flag;
     }
 
     return 1;
@@ -2894,12 +2898,14 @@ static BLURAY_TITLE_INFO* _fill_title_info(NAV_TITLE* title, uint32_t title_idx,
             ci->ig_stream_count = pi->stn.num_ig;
             ci->sec_video_stream_count = pi->stn.num_secondary_video;
             ci->sec_audio_stream_count = pi->stn.num_secondary_audio;
+            ci->dv_stream_count = pi->stn.num_dv;
             if (!_copy_streams(nc, &ci->video_streams, pi->stn.video, ci->video_stream_count) ||
                 !_copy_streams(nc, &ci->audio_streams, pi->stn.audio, ci->audio_stream_count) ||
                 !_copy_streams(nc, &ci->pg_streams, pi->stn.pg, ci->pg_stream_count) ||
                 !_copy_streams(nc, &ci->ig_streams, pi->stn.ig, ci->ig_stream_count) ||
                 !_copy_streams(nc, &ci->sec_video_streams, pi->stn.secondary_video, ci->sec_video_stream_count) ||
-                !_copy_streams(nc, &ci->sec_audio_streams, pi->stn.secondary_audio, ci->sec_audio_stream_count)) {
+                !_copy_streams(nc, &ci->sec_audio_streams, pi->stn.secondary_audio, ci->sec_audio_stream_count) ||
+                !_copy_streams(nc, &ci->dv_streams, pi->stn.dv, ci->dv_stream_count)) {
 
                 goto error;
             }
@@ -2907,6 +2913,7 @@ static BLURAY_TITLE_INFO* _fill_title_info(NAV_TITLE* title, uint32_t title_idx,
     }
 
     title_info->mvc_base_view_r_flag = title->pl->app_info.mvc_base_view_r_flag;
+    title_info->sdr_conversion_notification_flag = title->pl->app_info.sdr_conversion_notification_flag;
 
     return title_info;
 
@@ -2994,6 +3001,7 @@ void bd_free_title_info(BLURAY_TITLE_INFO *title_info)
                 X_FREE(title_info->clips[ii].ig_streams);
                 X_FREE(title_info->clips[ii].sec_video_streams);
                 X_FREE(title_info->clips[ii].sec_audio_streams);
+                X_FREE(title_info->clips[ii].dv_streams);
             }
             X_FREE(title_info->clips);
         }
@@ -3583,7 +3591,7 @@ static int _play_title(BLURAY *bd, unsigned title)
 }
 
 /* BD-J callback */
-int bd_play_title_internal(BLURAY *bd, unsigned title)
+int bdpriv_play_title_internal(BLURAY *bd, unsigned title)
 {
     /* used by BD-J. Like bd_play_title() but bypasses UO mask checks. */
     int ret;

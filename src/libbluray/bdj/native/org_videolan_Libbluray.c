@@ -218,7 +218,7 @@ JNIEXPORT jbyteArray JNICALL Java_org_videolan_Libbluray_getAacsDataN
   (JNIEnv * env, jclass cls, jlong np, jint type)
 {
     BLURAY* bd = (BLURAY*)(intptr_t)np;
-    const uint8_t *data = disc_get_data(bd_get_disc(bd), type);
+    const uint8_t *data = disc_get_data(bdpriv_get_disc(bd), type);
     size_t data_size = 16;
 
     BD_DEBUG(DBG_JNI, "getAacsDataN(%d) -> %p\n", (int)type, (const void *)data);
@@ -249,7 +249,7 @@ JNIEXPORT jlong JNICALL Java_org_videolan_Libbluray_getUOMaskN(JNIEnv * env,
     BLURAY* bd = (BLURAY*)(intptr_t)np;
 
     BD_DEBUG(DBG_JNI, "getUOMaskN()\n");
-    return bd_get_uo_mask(bd);
+    return bdpriv_get_uo_mask(bd);
 }
 
 JNIEXPORT void JNICALL Java_org_videolan_Libbluray_setUOMaskN(JNIEnv * env,
@@ -257,7 +257,7 @@ JNIEXPORT void JNICALL Java_org_videolan_Libbluray_setUOMaskN(JNIEnv * env,
     BLURAY* bd = (BLURAY*)(intptr_t)np;
 
     BD_DEBUG(DBG_JNI, "setUOMaskN(%d,%d)\n", (int)menuCallMask, (int)titleSearchMask);
-    bd_set_bdj_uo_mask(bd, ((!!menuCallMask) * BDJ_MENU_CALL_MASK) | ((!!titleSearchMask) * BDJ_TITLE_SEARCH_MASK));
+    bdpriv_set_bdj_uo_mask(bd, ((!!menuCallMask) * BDJ_MENU_CALL_MASK) | ((!!titleSearchMask) * BDJ_TITLE_SEARCH_MASK));
 }
 
 JNIEXPORT void JNICALL Java_org_videolan_Libbluray_setKeyInterestN(JNIEnv * env,
@@ -265,7 +265,7 @@ JNIEXPORT void JNICALL Java_org_videolan_Libbluray_setKeyInterestN(JNIEnv * env,
     BLURAY* bd = (BLURAY*)(intptr_t)np;
 
     BD_DEBUG(DBG_JNI, "setKeyInterestN(0x%x)\n", (int)mask);
-    bd_set_bdj_kit(bd, mask);
+    bdpriv_set_bdj_kit(bd, mask);
 }
 
 JNIEXPORT jint JNICALL Java_org_videolan_Libbluray_setVirtualPackageN(JNIEnv * env,
@@ -280,7 +280,7 @@ JNIEXPORT jint JNICALL Java_org_videolan_Libbluray_setVirtualPackageN(JNIEnv * e
 
     BD_DEBUG(DBG_JNI|DBG_CRIT, "setVirtualPackageN(%s,%d)\n", path ? path : "<null>", (int)psr_init_backup);
 
-    result = bd_set_virtual_package(bd, path, (int)psr_init_backup);
+    result = bdpriv_set_virtual_package(bd, path, (int)psr_init_backup);
 
     if (vpPath) {
         (*env)->ReleaseStringUTFChars(env, vpPath, path);
@@ -295,7 +295,7 @@ JNIEXPORT jlong JNICALL Java_org_videolan_Libbluray_seekN(JNIEnv * env,
 
     BD_DEBUG(DBG_JNI, "seekN(tick=%" PRId64 ", mark=%d, playitem=%d)\n", (int64_t)tick, (int)playmark, (int)playitem);
 
-    return bd_bdj_seek(bd, playitem, playmark, tick);
+    return bdpriv_seek(bd, playitem, playmark, tick);
 }
 
 JNIEXPORT jint JNICALL Java_org_videolan_Libbluray_selectPlaylistN(
@@ -309,7 +309,7 @@ JNIEXPORT jint JNICALL Java_org_videolan_Libbluray_selectPlaylistN(
     BD_DEBUG(DBG_JNI, "selectPlaylistN(pl=%d, pi=%d, pm=%d, time=%ld)\n",
              (int)playlist, (int)playitem, (int)playmark, (long)time);
 
-    return bd_play_playlist_at(bd, playlist, playitem, playmark, time);
+    return bdpriv_play_playlist_at(bd, playlist, playitem, playmark, time);
 }
 
 JNIEXPORT jint JNICALL Java_org_videolan_Libbluray_selectTitleN(JNIEnv * env,
@@ -318,7 +318,7 @@ JNIEXPORT jint JNICALL Java_org_videolan_Libbluray_selectTitleN(JNIEnv * env,
 
     BD_DEBUG(DBG_JNI, "selectTitleN(%d)\n", (int)title);
 
-    return bd_play_title_internal(bd, title);
+    return bdpriv_play_title_internal(bd, title);
 }
 
 JNIEXPORT jint JNICALL Java_org_videolan_Libbluray_selectAngleN(JNIEnv * env,
@@ -330,7 +330,7 @@ JNIEXPORT jint JNICALL Java_org_videolan_Libbluray_selectAngleN(JNIEnv * env,
 JNIEXPORT jint JNICALL Java_org_videolan_Libbluray_soundEffectN(JNIEnv * env,
         jclass cls, jlong np, jint id) {
     BLURAY* bd = (BLURAY*)(intptr_t)np;
-    return bd_bdj_sound_effect(bd, id);
+    return bdpriv_sound_effect(bd, id);
 }
 
 JNIEXPORT jlong JNICALL Java_org_videolan_Libbluray_tellTimeN(JNIEnv * env,
@@ -345,14 +345,14 @@ JNIEXPORT jint JNICALL Java_org_videolan_Libbluray_selectRateN(JNIEnv * env,
 
     BD_DEBUG(DBG_JNI, "selectRateN(%1.1f, %d)\n", (float)rate, (int)reason);
 
-    bd_select_rate(bd, (float)rate, reason);
+    bdpriv_select_rate(bd, (float)rate, reason);
     return 1;
 }
 
 JNIEXPORT jint JNICALL Java_org_videolan_Libbluray_readRegN(JNIEnv * env,
         jclass cls, jlong np, jint is_psr, jint num) {
     BLURAY* bd = (BLURAY*)(intptr_t)np;
-    int value = bd_reg_read(bd, is_psr, num);
+    int value = bdpriv_reg_read(bd, is_psr, num);
 
     BD_DEBUG(DBG_JNI, "readRegN(%s_%d) -> %d\n", is_psr ? "PSR" : "GPR", (int)num, (int)value);
 
@@ -371,7 +371,7 @@ JNIEXPORT jint JNICALL Java_org_videolan_Libbluray_writeRegN(JNIEnv * env,
                  is_psr ? "PSR" : "GPR", (int)num, (int)value, (int)mask);
     }
 
-    return bd_reg_write(bd, is_psr, num, value, mask);
+    return bdpriv_reg_write(bd, is_psr, num, value, mask);
 }
 
 JNIEXPORT jint JNICALL Java_org_videolan_Libbluray_cacheBdRomFileN(JNIEnv * env,
@@ -379,7 +379,7 @@ JNIEXPORT jint JNICALL Java_org_videolan_Libbluray_cacheBdRomFileN(JNIEnv * env,
                                                                    jstring jrel_path, jstring jcache_path) {
 
     BLURAY *bd = (BLURAY*)(intptr_t)np;
-    BD_DISC *disc = bd_get_disc(bd);
+    BD_DISC *disc = bdpriv_get_disc(bd);
     int result = -1;
 
     const char *rel_path = (*env)->GetStringUTFChars(env, jrel_path, NULL);
@@ -408,7 +408,7 @@ JNIEXPORT jobjectArray JNICALL Java_org_videolan_Libbluray_listBdFilesN(JNIEnv *
                                                                         jboolean onlyBdRom) {
 
     BLURAY *bd = (BLURAY*)(intptr_t)np;
-    BD_DISC *disc = bd_get_disc(bd);
+    BD_DISC *disc = bdpriv_get_disc(bd);
 
     const char *path = (*env)->GetStringUTFChars(env, jpath, NULL);
     if (!path) {
@@ -485,7 +485,7 @@ JNIEXPORT jobject JNICALL Java_org_videolan_Libbluray_getBdjoN(JNIEnv * env,
     }
     BD_DEBUG(DBG_JNI, "getBdjoN(%s)\n", file);
 
-    bdjo = bdjo_get(bd_get_disc(bd), file);
+    bdjo = bdjo_get(bdpriv_get_disc(bd), file);
     if (bdjo) {
         jbdjo = bdjo_make_jobj(env, bdjo);
         bdjo_free(&bdjo);
@@ -505,7 +505,7 @@ static void _updateGraphic(JNIEnv * env,
 
     /* close ? */
     if (!rgbArray) {
-        bd_bdj_osd_cb(bd, NULL, (int)width, (int)height, 0, 0, 0, 0);
+        bdpriv_bdj_osd_cb(bd, NULL, (int)width, (int)height, 0, 0, 0, 0);
         return;
     }
 
@@ -587,7 +587,7 @@ static void _updateGraphic(JNIEnv * env,
             buf->unlock(buf);
         }
 
-        bd_bdj_osd_cb(bd, buf->buf[BD_OVERLAY_IG], (int)width, (int)height,
+        bdpriv_bdj_osd_cb(bd, buf->buf[BD_OVERLAY_IG], (int)width, (int)height,
                       x0, y0, x1, y1);
 
     } else {
@@ -596,7 +596,7 @@ static void _updateGraphic(JNIEnv * env,
 
         jint *image = (jint *)(*env)->GetPrimitiveArrayCritical(env, rgbArray, NULL);
         if (image) {
-            bd_bdj_osd_cb(bd, (const unsigned *)image, (int)width, (int)height,
+            bdpriv_bdj_osd_cb(bd, (const unsigned *)image, (int)width, (int)height,
                           x0, y0, x1, y1);
             (*env)->ReleasePrimitiveArrayCritical(env, rgbArray, image, JNI_ABORT);
         } else {
@@ -623,11 +623,11 @@ JNIEXPORT void JNICALL Java_org_videolan_Libbluray_updateGraphicN(JNIEnv * env,
         return;
     }
 
-    BD_ARGB_BUFFER *buf = bd_lock_osd_buffer(bd);
+    BD_ARGB_BUFFER *buf = bdpriv_lock_osd_buffer(bd);
 
     _updateGraphic(env, bd, width, height, rgbArray, x0, y0, x1, y1, buf);
 
-    bd_unlock_osd_buffer(bd);
+    bdpriv_unlock_osd_buffer(bd);
 }
 
 #define CC (char*)(uintptr_t)  /* cast a literal from (const char*) */

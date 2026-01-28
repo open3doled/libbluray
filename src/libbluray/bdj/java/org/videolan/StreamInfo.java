@@ -22,6 +22,7 @@ package org.videolan;
 import java.awt.Dimension;
 
 import org.bluray.ti.CodingType;
+import org.videolan.ti.CodingTypeHelper;
 
 public class StreamInfo {
     public StreamInfo(byte coding_type, byte format, byte rate,
@@ -36,43 +37,7 @@ public class StreamInfo {
     }
 
     public CodingType getCodingType() {
-        switch (coding_type) {
-        case (byte)0x02:
-            return CodingType.MPEG2_VIDEO;
-        case (byte)0x1b:
-            return CodingType.MPEG4_AVC_VIDEO;
-        case (byte)0xea:
-            return CodingType.SMPTE_VC1_VIDEO;
-        case (byte)0x80:
-            return CodingType.LPCM_AUDIO;
-        case (byte)0x81:
-            return CodingType.DOLBY_AC3_AUDIO;
-        case (byte)0x82:
-            return CodingType.DTS_AUDIO;
-        case (byte)0x83:
-            return CodingType.DOLBY_LOSSLESS_AUDIO;
-        case (byte)0x84:
-        case (byte)0xA1:
-            return CodingType.DOLBY_DIGITAL_PLUS_AUDIO;
-        case (byte)0x85:
-            return CodingType.DTS_HD_AUDIO_EXCEPT_XLL;
-        case (byte)0x86:
-            return CodingType.DTS_HD_AUDIO_XLL;
-        case (byte)0xA2:
-            return CodingType.DTS_HD_AUDIO_LBR;
-        //FIXME:case (byte)0x??:
-        //    return CodingType.DRA_AUDIO;
-        //FIXME:case (byte)0x??:
-        //    return CodingType.DRA_EXTENSION_AUDIO;
-        case (byte)0x90:
-            return CodingType.PRESENTATION_GRAPHICS;
-        case (byte)0x91:
-            return CodingType.INTERACTIVE_GRAPHICS;
-        case (byte)0x92:
-            return CodingType.TEXT_SUBTITLE;
-        default:
-            return null;
-        }
+        return CodingTypeHelper.getCodingType(coding_type);
     }
 
     public byte getFormat() {

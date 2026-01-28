@@ -2,6 +2,7 @@
  * This file is part of libbluray
  * Copyright (C) 2010  William Hahne
  * Copyright (C) 2013  Petri Hintukainen <phintuka@users.sourceforge.net>
+ * Copyright (C) 2026  libbluray project
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -377,7 +378,7 @@ public class HVisible extends HComponent implements HState {
     private Map lookData;
     private int BackgroundMode = NO_BACKGROUND_FILL;
     private boolean BordersEnabled = true;
-    private int InteractionState = 0;
+    private int InteractionState = NORMAL_STATE;
     private int halign = HALIGN_LEFT;
     private int valign = VALIGN_TOP;
     private int resizeMode = RESIZE_NONE;
