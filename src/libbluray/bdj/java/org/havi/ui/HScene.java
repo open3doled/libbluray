@@ -1,6 +1,7 @@
 /*
  * This file is part of libbluray
  * Copyright (C) 2010  William Hahne
+ * Copyright (C) 2026  libbluray project
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -33,6 +34,7 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
 
+import org.havi.ui.event.HActionEvent;
 import org.havi.ui.event.HEventGroup;
 import org.videolan.BDJXletContext;
 import org.videolan.GUIManager;
@@ -47,6 +49,85 @@ public class HScene extends Container implements HComponentOrdering {
             logger.error("HScene() created from privileged context: " + Logger.dumpStack());
         }
         BDToolkit.addComponent(this);
+        
+        // Make HScene focusable so it can receive key events
+        setFocusable(true);
+        setFocusTraversalKeysEnabled(false);
+        enableEvents(java.awt.AWTEvent.KEY_EVENT_MASK);
+    }
+    
+    public boolean isFocusTraversable() {
+        return true;
+    }
+
+    /**
+     * Fallback key event handler for HAVI navigation/action.
+     * Routes keys to the current focus owner.
+     * Note: First navigable gets focus automatically in setVisible(),
+     * but we have a fallback here in case children weren't visible yet.
+     */
+    protected void processKeyEvent(KeyEvent e) {
+        if (e.getID() == KeyEvent.KEY_PRESSED) {
+            Component focusOwner = java.awt.KeyboardFocusManager.getCurrentKeyboardFocusManager().getFocusOwner();
+            int keyCode = e.getKeyCode();
+            
+            // Fallback: if no navigable has focus, focus the first one
+            // User sees what's focused before taking action (like clicking a window to focus it)
+            if (!(focusOwner instanceof HNavigable)) {
+                HNavigable firstNav = findFirstNavigable(this);
+                if (firstNav != null && firstNav instanceof Component) {
+                    ((Component) firstNav).requestFocus();
+                    e.consume();
+                    return;
+                }
+            }
+            
+            // Handle ENTER for HActionable components
+            if (keyCode == KeyEvent.VK_ENTER && focusOwner instanceof HActionInputPreferred) {
+                HActionInputPreferred actionable = (HActionInputPreferred) focusOwner;
+                String command = actionable.getActionCommand();
+                HActionEvent actionEvent = new HActionEvent(actionable, HActionEvent.ACTION_PERFORMED, command);
+                actionable.processHActionEvent(actionEvent);
+                e.consume();
+                return;
+            }
+            
+            // Handle arrow keys for HNavigable components
+            if (keyCode == KeyEvent.VK_UP || keyCode == KeyEvent.VK_DOWN ||
+                keyCode == KeyEvent.VK_LEFT || keyCode == KeyEvent.VK_RIGHT) {
+                
+                if (focusOwner instanceof HNavigable) {
+                    HNavigable navigable = (HNavigable) focusOwner;
+                    HNavigable target = navigable.getMove(keyCode);
+                    
+                    if (target != null && target instanceof Component) {
+                        ((Component) target).requestFocus();
+                        e.consume();
+                        return;
+                    }
+                }
+            }
+        }
+        super.processKeyEvent(e);
+    }
+    
+    /**
+     * Recursively finds the first visible HNavigable component.
+     */
+    private HNavigable findFirstNavigable(Container container) {
+        for (int i = 0; i < container.getComponentCount(); i++) {
+            Component c = container.getComponent(i);
+            if (!c.isVisible()) continue;
+            
+            if (c instanceof HNavigable) {
+                return (HNavigable) c;
+            }
+            if (c instanceof Container) {
+                HNavigable found = findFirstNavigable((Container) c);
+                if (found != null) return found;
+            }
+        }
+        return null;
     }
 
     public BDJXletContext getXletContext() {
@@ -54,24 +135,34 @@ public class HScene extends Container implements HComponentOrdering {
     }
 
     public void paint(Graphics g) {
+        // Note: Graphics context is already constrained/translated to component origin
+        // All drawing should use (0, 0) based coordinates, not getX()/getY()
+        int width = super.getWidth();
+        int height = super.getHeight();
+
         if (backgroundMode == BACKGROUND_FILL) {
             g.setColor(getBackground());
-            g.fillRect(super.getX(), super.getY(), super.getWidth(), super.getHeight());
+            g.fillRect(0, 0, width, height);
         }
 
         if (image != null) {
+            int imgWidth = image.getWidth(null);
+            int imgHeight = image.getHeight(null);
+
             switch (imageMode) {
             case IMAGE_CENTER:
-                g.drawImage(image, (super.getWidth() - image.getWidth(null)) / 2,
-                        (super.getHeight() - image.getHeight(null)) / 2, null);
+                g.drawImage(image, (width - imgWidth) / 2,
+                        (height - imgHeight) / 2, null);
                 break;
             case IMAGE_STRETCH:
-                g.drawImage(image, super.getX(), super.getY(), super.getWidth(), super.getHeight(), null);
+                g.drawImage(image, 0, 0, width, height, null);
                 break;
             case IMAGE_TILE:
-                for (int x = super.getX(); x < super.getWidth(); x += image.getWidth(null))
-                    for (int y = super.getY(); y < super.getHeight(); y += image.getHeight(null))
-                        g.drawImage(image, x, y, null);
+                if (imgWidth > 0 && imgHeight > 0) {
+                    for (int x = 0; x < width; x += imgWidth)
+                        for (int y = 0; y < height; y += imgHeight)
+                            g.drawImage(image, x, y, null);
+                }
                 break;
             }
         }
@@ -385,23 +476,20 @@ public class HScene extends Container implements HComponentOrdering {
             return;
         super.setVisible(visible);
 
-        /*
-         * This doesn't work
-         *  - visible state of other HScenes is never restored
-         *     => no focus, key events are lost
-         *  - Scenes are not wiped from GUI
-
         if (visible) {
-            for (int i = 0; i < GUIManager.getInstance().getComponentCount(); i++) {
-                    Component c = GUIManager.getInstance().getComponent(i);
-                    if (c != this)
-                        c.setVisible(false);
-            }
-        }
-        */
-
-        if (visible)
             GUIManager.getInstance().setVisible(visible);
+
+            // Focus first visible navigable child, or HScene as fallback
+            HNavigable firstNav = findFirstNavigable(this);
+            if (firstNav != null && firstNav instanceof Component) {
+                ((Component) firstNav).requestFocus();
+            } else {
+                if (!requestFocusInWindow()) {
+                    requestFocus();
+                }
+            }
+            setActive(true);
+        }
     }
 
     public int getBackgroundMode() {
