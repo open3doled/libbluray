@@ -210,24 +210,28 @@ public class HaviTestXlet implements Xlet, HActionListener {
 
         // Create text buttons (2x2 grid) - using text labels instead of images
         textButton1 = new HTextButton("Button 1", tButtonColX1, tButtonRowY1, BUTTON_WIDTH, BUTTON_HEIGHT);
+        textButton1.setFont(textFont);
         textButton1.setForeground(Color.WHITE);
         textButton1.setBackground(Color.DARK_GRAY);
         textButton1.setActionCommand("toggle_text1");
         textButton1.addHActionListener(this);
 
         textButton2 = new HTextButton("Button 2", tButtonColX2, tButtonRowY1, BUTTON_WIDTH, BUTTON_HEIGHT);
+        textButton2.setFont(textFont);
         textButton2.setForeground(Color.WHITE);
         textButton2.setBackground(Color.DARK_GRAY);
         textButton2.setActionCommand("toggle_text2");
         textButton2.addHActionListener(this);
 
         textButton3 = new HTextButton("Button 3", tButtonColX1, tButtonRowY2, BUTTON_WIDTH, BUTTON_HEIGHT);
+        textButton3.setFont(textFont);
         textButton3.setForeground(Color.WHITE);
         textButton3.setBackground(Color.DARK_GRAY);
         textButton3.setActionCommand("toggle_text3");
         textButton3.addHActionListener(this);
 
         textButton4 = new HTextButton("Button 4", tButtonColX2, tButtonRowY2, BUTTON_WIDTH, BUTTON_HEIGHT);
+        textButton4.setFont(textFont);
         textButton4.setForeground(Color.WHITE);
         textButton4.setBackground(Color.DARK_GRAY);
         textButton4.setActionCommand("toggle_text4");
