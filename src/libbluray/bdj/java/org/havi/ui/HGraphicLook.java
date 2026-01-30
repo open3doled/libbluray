@@ -31,6 +31,7 @@ import java.awt.Insets;
 public class HGraphicLook implements HExtendedLook {
 
     private static final Insets DEFAULT_INSETS = new Insets(2, 2, 2, 2);
+    private static final Insets NO_INSETS = new Insets(0, 0, 0, 0);
 
     public HGraphicLook() {
     }
@@ -78,7 +79,8 @@ public class HGraphicLook implements HExtendedLook {
         // Get the image for this state
         Image imageToDraw = visible.getGraphicContent(state);
         if (imageToDraw != null) {
-            drawImage(g, imageToDraw, visible);
+            Insets insets = getInsets(visible);
+            drawImage(g, imageToDraw, visible, insets);
         }
     }
 
@@ -103,6 +105,7 @@ public class HGraphicLook implements HExtendedLook {
     /**
      * Draws an image onto the HVisible with proper alignment.
      * Uses the HVisible's horizontal and vertical alignment settings.
+     * Renders within the content area (excluding insets/borders).
      *
      * Note: This implementation only supports RESIZE_NONE mode as per HAVI spec
      * minimum requirements. Scaling support is optional.
@@ -110,21 +113,30 @@ public class HGraphicLook implements HExtendedLook {
      * @param g Graphics context
      * @param imageToDraw The image to draw
      * @param visible The HVisible owner
+     * @param insets The insets defining the border area
      * @return true if the image was drawn successfully
      */
-    protected static boolean drawImage(Graphics g, Image imageToDraw, HVisible visible) {
+    protected static boolean drawImage(Graphics g, Image imageToDraw, HVisible visible, Insets insets) {
         int hAlign = visible.getHorizontalAlignment();
         int vAlign = visible.getVerticalAlignment();
 
-        int vWidth = visible.getWidth();
-        int vHeight = visible.getHeight();
+        // Calculate content area (excluding insets)
+        // Using contentX/contentY for consistency with contentWidth/contentHeight
+        int contentX = insets.left;
+        int contentY = insets.top;
+        int contentWidth = visible.getWidth() - insets.left - insets.right;
+        int contentHeight = visible.getHeight() - insets.top - insets.bottom;
+
+        if (contentWidth <= 0 || contentHeight <= 0) {
+            return false;
+        }
 
         int imgWidth = imageToDraw.getWidth(visible);
         int imgHeight = imageToDraw.getHeight(visible);
 
-        // If image dimensions aren't available yet, use component size
-        if (imgWidth <= 0) imgWidth = vWidth;
-        if (imgHeight <= 0) imgHeight = vHeight;
+        // If image dimensions aren't available yet, use content area size
+        if (imgWidth <= 0) imgWidth = contentWidth;
+        if (imgHeight <= 0) imgHeight = contentHeight;
 
         /*
          * Per HAVI spec: "Note that the results of applying the VALIGN_JUSTIFY
@@ -133,34 +145,34 @@ public class HGraphicLook implements HExtendedLook {
          * as justification is meaningless in this context."
          */
 
-        int drawX = 0;
-        int drawY = 0;
+        int drawX = contentX;
+        int drawY = contentY;
 
-        // Calculate horizontal position
+        // Calculate horizontal position within content area
         switch (hAlign) {
             case HVisible.HALIGN_CENTER:
             case HVisible.HALIGN_JUSTIFY:
-                drawX = (vWidth - imgWidth) / 2;
+                drawX = contentX + (contentWidth - imgWidth) / 2;
                 break;
             case HVisible.HALIGN_LEFT:
-                drawX = 0;
+                drawX = contentX;
                 break;
             case HVisible.HALIGN_RIGHT:
-                drawX = vWidth - imgWidth;
+                drawX = contentX + contentWidth - imgWidth;
                 break;
         }
 
-        // Calculate vertical position
+        // Calculate vertical position within content area
         switch (vAlign) {
             case HVisible.VALIGN_CENTER:
             case HVisible.VALIGN_JUSTIFY:
-                drawY = (vHeight - imgHeight) / 2;
+                drawY = contentY + (contentHeight - imgHeight) / 2;
                 break;
             case HVisible.VALIGN_TOP:
-                drawY = 0;
+                drawY = contentY;
                 break;
             case HVisible.VALIGN_BOTTOM:
-                drawY = vHeight - imgHeight;
+                drawY = contentY + contentHeight - imgHeight;
                 break;
         }
 
@@ -180,29 +192,193 @@ public class HGraphicLook implements HExtendedLook {
         }
     }
 
-    public Dimension getMinimumSize(HVisible visible) {
-        // Return the size of the NORMAL_STATE content, or component size if none
-        Image img = visible.getGraphicContent(HState.NORMAL_STATE);
-        if (img != null) {
-            int w = img.getWidth(visible);
-            int h = img.getHeight(visible);
-            if (w > 0 && h > 0) {
-                Insets insets = getInsets(visible);
-                return new Dimension(w + insets.left + insets.right,
-                                   h + insets.top + insets.bottom);
+    /**
+     * Checks if scaling is supported and requested for this HVisible.
+     * Per spec, HGraphicLook may support scalable content; RESIZE_NONE is minimum requirement.
+     */
+    private boolean isScalingRequested(HVisible visible) {
+        int resizeMode = visible.getResizeMode();
+        return resizeMode == HVisible.RESIZE_PRESERVE_ASPECT ||
+               resizeMode == HVisible.RESIZE_ARBITRARY;
+    }
+
+    /**
+     * Checks if the HVisible has any graphic content set across all states.
+     */
+    private boolean hasContent(HVisible visible) {
+        for (int state = HState.FIRST_STATE; state <= HState.LAST_STATE; state++) {
+            Image img = visible.getGraphicContent(state);
+            if (img != null) {
+                return true;
             }
         }
-        return visible.getSize();
+        return false;
+    }
+
+    /**
+     * Gets the content size across all states.
+     * When scaling, returns narrowest width and shortest height.
+     * When not scaling, returns widest width and tallest height (to fit all content).
+     *
+     * @param visible The HVisible to examine
+     * @param forScaling If true, return minimum dimensions; if false, return maximum dimensions
+     * @return Content dimensions, or null if no content with valid dimensions
+     */
+    private Dimension getContentSize(HVisible visible, boolean forScaling) {
+        int resultWidth = forScaling ? Integer.MAX_VALUE : 0;
+        int resultHeight = forScaling ? Integer.MAX_VALUE : 0;
+        boolean foundContent = false;
+
+        for (int state = HState.FIRST_STATE; state <= HState.LAST_STATE; state++) {
+            Image img = visible.getGraphicContent(state);
+            if (img != null) {
+                int w = img.getWidth(visible);
+                int h = img.getHeight(visible);
+                if (w > 0 && h > 0) {
+                    foundContent = true;
+                    if (forScaling) {
+                        // For scaling: find narrowest and shortest
+                        if (w < resultWidth) resultWidth = w;
+                        if (h < resultHeight) resultHeight = h;
+                    } else {
+                        // For no scaling: find widest and tallest
+                        if (w > resultWidth) resultWidth = w;
+                        if (h > resultHeight) resultHeight = h;
+                    }
+                }
+            }
+        }
+
+        if (!foundContent) {
+            return null;
+        }
+        return new Dimension(resultWidth, resultHeight);
+    }
+
+    public Dimension getMinimumSize(HVisible visible) {
+        Insets insets = getInsets(visible);
+        int insetsWidth = insets.left + insets.right;
+        int insetsHeight = insets.top + insets.bottom;
+
+        // Step 1: HTextLook-specific - skip for HGraphicLook
+
+        // Step 2: If scaling supported AND requested AND content set
+        // Return narrowest width + shortest height
+        if (isScalingRequested(visible)) {
+            Dimension contentSize = getContentSize(visible, true); // forScaling = true
+            if (contentSize != null) {
+                return new Dimension(contentSize.width + insetsWidth,
+                                   contentSize.height + insetsHeight);
+            }
+        }
+
+        // Step 3: If no scaling or no scaling requested AND content set
+        // Return size large enough for all content
+        Dimension contentSize = getContentSize(visible, false); // forScaling = false
+        if (contentSize != null) {
+            return new Dimension(contentSize.width + insetsWidth,
+                               contentSize.height + insetsHeight);
+        }
+
+        // Step 4: No content but default size set
+        Dimension defaultSize = visible.getDefaultSize();
+        if (defaultSize != null &&
+            defaultSize.width != HVisible.NO_DEFAULT_WIDTH &&
+            defaultSize.height != HVisible.NO_DEFAULT_HEIGHT) {
+            return new Dimension(defaultSize.width + insetsWidth,
+                               defaultSize.height + insetsHeight);
+        }
+
+        // Step 5: No content or default size - implementation-specific minimum
+        return new Dimension(insetsWidth, insetsHeight);
     }
 
     public Dimension getPreferredSize(HVisible visible) {
-        // Same as minimum for graphic content
-        return getMinimumSize(visible);
+        Insets insets = getInsets(visible);
+        int insetsWidth = insets.left + insets.right;
+        int insetsHeight = insets.top + insets.bottom;
+
+        // Step 1: If default size set, return it + insets
+        Dimension defaultSize = visible.getDefaultSize();
+        if (defaultSize != null) {
+            int w = defaultSize.width;
+            int h = defaultSize.height;
+
+            boolean hasDefaultWidth = (w != HVisible.NO_DEFAULT_WIDTH);
+            boolean hasDefaultHeight = (h != HVisible.NO_DEFAULT_HEIGHT);
+
+            if (hasDefaultWidth && hasDefaultHeight) {
+                // Full default size is set
+                return new Dimension(w + insetsWidth, h + insetsHeight);
+            }
+
+            // Handle NO_DEFAULT_WIDTH or NO_DEFAULT_HEIGHT cases
+            if (hasDefaultWidth || hasDefaultHeight) {
+                Dimension contentSize = getContentSize(visible, false);
+                if (contentSize != null) {
+                    if (!hasDefaultWidth) {
+                        w = contentSize.width;
+                    }
+                    if (!hasDefaultHeight) {
+                        h = contentSize.height;
+                    }
+                    return new Dimension(w + insetsWidth, h + insetsHeight);
+                }
+                // No content - use current size for missing dimension
+                Dimension currentSize = visible.getSize();
+                if (!hasDefaultWidth) {
+                    w = Math.max(0, currentSize.width - insetsWidth);
+                }
+                if (!hasDefaultHeight) {
+                    h = Math.max(0, currentSize.height - insetsHeight);
+                }
+                return new Dimension(w + insetsWidth, h + insetsHeight);
+            }
+        }
+
+        // Step 2: HTextLook-specific - skip for HGraphicLook
+
+        // Step 3: If no scaling or no scaling requested AND content present
+        // Return size large enough for content
+        if (!isScalingRequested(visible)) {
+            Dimension contentSize = getContentSize(visible, false);
+            if (contentSize != null) {
+                return new Dimension(contentSize.width + insetsWidth,
+                                   contentSize.height + insetsHeight);
+            }
+        }
+
+        // Step 4: If scaling supported AND content set, return current size
+        if (isScalingRequested(visible) && hasContent(visible)) {
+            return visible.getSize();
+        }
+
+        // Step 5: No content and no default size - return current size
+        return visible.getSize();
     }
 
     public Dimension getMaximumSize(HVisible visible) {
-        // No upper limit - return component size
-        return visible.getSize();
+        Insets insets = getInsets(visible);
+        int insetsWidth = insets.left + insets.right;
+        int insetsHeight = insets.top + insets.bottom;
+
+        // Step 1: HTextLook-specific - skip for HGraphicLook
+
+        // Step 2: If scaling supported, return current size
+        if (isScalingRequested(visible)) {
+            return visible.getSize();
+        }
+
+        // Step 3: If no scaling support AND content set
+        // Return size large enough for content
+        Dimension contentSize = getContentSize(visible, false);
+        if (contentSize != null) {
+            return new Dimension(contentSize.width + insetsWidth,
+                               contentSize.height + insetsHeight);
+        }
+
+        // Step 4: No content - return Short.MAX_VALUE
+        return new Dimension(Short.MAX_VALUE, Short.MAX_VALUE);
     }
 
     public boolean isOpaque(HVisible visible) {
@@ -220,6 +396,9 @@ public class HGraphicLook implements HExtendedLook {
     }
 
     public Insets getInsets(HVisible visible) {
+        if (!visible.getBordersEnabled()) {
+            return NO_INSETS;
+        }
         return DEFAULT_INSETS;
     }
 }
