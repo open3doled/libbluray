@@ -13,7 +13,6 @@
     - Title 5: Multiline Text Test (00005)
     - Title 6: Resize Test (00006)
     - Title 7: Color Test (00007)
-    - Title 8: HAVI Test (00008) - original comprehensive test
   
   Note: Menu is accessed via firstPlayback/topMenu, not as a numbered title.
   Titles are 1-indexed in BD-J.
@@ -88,14 +87,6 @@
                 <titleAccessType>V_01</titleAccessType>
                 <bdjObject>
                     <bdjoFileName>00007</bdjoFileName>
-                </bdjObject>
-            </title>
-            
-            <!-- Title 8: HAVI Test (original) -->
-            <title>
-                <titleAccessType>V_01</titleAccessType>
-                <bdjObject>
-                    <bdjoFileName>00008</bdjoFileName>
                 </bdjObject>
             </title>
         </titles>

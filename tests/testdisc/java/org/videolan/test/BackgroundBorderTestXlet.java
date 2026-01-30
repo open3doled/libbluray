@@ -27,6 +27,7 @@ import org.bluray.ti.selection.TitleContext;
 import org.havi.ui.HScene;
 import org.havi.ui.HSceneFactory;
 import org.havi.ui.HStaticText;
+import org.havi.ui.HText;
 import org.havi.ui.HTextButton;
 import org.havi.ui.HVisible;
 import org.havi.ui.event.HActionListener;
@@ -34,18 +35,20 @@ import org.havi.ui.event.HActionListener;
 /**
  * Tests background fill modes and border rendering.
  * 
- * Layout: 2x2 grid showing:
- * - NO_BACKGROUND_FILL + borders disabled
- * - NO_BACKGROUND_FILL + borders enabled
- * - BACKGROUND_FILL + borders disabled
- * - BACKGROUND_FILL + borders enabled
+ * Layout: 2x2 grid showing combinations of:
+ * - NO_BACKGROUND_FILL vs BACKGROUND_FILL
+ * - Borders disabled (never shown) vs enabled (shown when focused)
+ * 
+ * Navigate between cells to see borders appear/disappear on focus.
+ * Text changes to indicate focus state.
  */
 public class BackgroundBorderTestXlet implements Xlet, HActionListener {
 
     private XletContext context;
     private HScene scene;
     private HStaticText titleLabel;
-    private HStaticText[] testCells;
+    private HStaticText subtitleLabel;
+    private HText[] testCells;
     private HTextButton menuButton;
     
     // Layout constants
@@ -66,35 +69,44 @@ public class BackgroundBorderTestXlet implements Xlet, HActionListener {
         int sceneHeight = scene.getHeight();
         
         Font titleFont = new Font("SansSerif", Font.BOLD, 28);
-        Font cellFont = new Font("SansSerif", Font.PLAIN, 20);
+        Font subtitleFont = new Font("SansSerif", Font.PLAIN, 16);
+        Font cellFont = new Font("SansSerif", Font.PLAIN, 18);
         Font buttonFont = new Font("SansSerif", Font.PLAIN, 20);
         
         // Title
-        titleLabel = new HStaticText("Background Fill & Border Test", 0, 10, sceneWidth, 40);
+        titleLabel = new HStaticText("Background Fill & Border Test", 0, 10, sceneWidth, 35);
         titleLabel.setFont(titleFont);
         titleLabel.setForeground(Color.WHITE);
         titleLabel.setHorizontalAlignment(HVisible.HALIGN_CENTER);
         titleLabel.setVerticalAlignment(HVisible.VALIGN_CENTER);
         scene.add(titleLabel);
         
+        // Subtitle with instructions
+        subtitleLabel = new HStaticText("Navigate with arrows. Borders appear when cell is FOCUSED.", 0, 45, sceneWidth, 25);
+        subtitleLabel.setFont(subtitleFont);
+        subtitleLabel.setForeground(Color.LIGHT_GRAY);
+        subtitleLabel.setHorizontalAlignment(HVisible.HALIGN_CENTER);
+        subtitleLabel.setVerticalAlignment(HVisible.VALIGN_CENTER);
+        scene.add(subtitleLabel);
+        
         // Calculate grid position (centered)
         int gridWidth = 2 * CELL_WIDTH + CELL_GAP;
-        int gridHeight = 2 * CELL_HEIGHT + CELL_GAP;
         int gridX = (sceneWidth - gridWidth) / 2;
-        int gridY = 80;
+        int gridY = 90;
         
-        // Test configurations
-        String[] labels = {
-            "NO_BACKGROUND_FILL\nBorders: OFF",
-            "NO_BACKGROUND_FILL\nBorders: ON",
-            "BACKGROUND_FILL\nBorders: OFF",
-            "BACKGROUND_FILL\nBorders: ON"
+        // Test configurations - text changes based on focus state
+        // Format: { normalText, focusedText }
+        String[][] labels = {
+            { "NO_BG_FILL\nNo Border", "NO_BG_FILL\nNo Border\n[FOCUSED]" },
+            { "NO_BG_FILL\nBorder when focused", "NO_BG_FILL\nBorder when focused\n[FOCUSED]" },
+            { "BG_FILL\nNo Border", "BG_FILL\nNo Border\n[FOCUSED]" },
+            { "BG_FILL\nBorder when focused", "BG_FILL\nBorder when focused\n[FOCUSED]" }
         };
         
         boolean[] bgFill = { false, false, true, true };
         boolean[] borders = { false, true, false, true };
         
-        testCells = new HStaticText[4];
+        testCells = new HText[4];
         
         for (int i = 0; i < 4; i++) {
             int row = i / 2;
@@ -102,7 +114,8 @@ public class BackgroundBorderTestXlet implements Xlet, HActionListener {
             int x = gridX + col * (CELL_WIDTH + CELL_GAP);
             int y = gridY + row * (CELL_HEIGHT + CELL_GAP);
             
-            testCells[i] = new HStaticText(labels[i], x, y, CELL_WIDTH, CELL_HEIGHT);
+            // HText constructor: (normalText, focusedText, x, y, width, height)
+            testCells[i] = new HText(labels[i][0], labels[i][1], x, y, CELL_WIDTH, CELL_HEIGHT);
             testCells[i].setFont(cellFont);
             testCells[i].setForeground(Color.WHITE);
             testCells[i].setBackground(new Color(100, 50, 50));
@@ -116,13 +129,21 @@ public class BackgroundBorderTestXlet implements Xlet, HActionListener {
                 testCells[i].setBackgroundMode(HVisible.NO_BACKGROUND_FILL);
             }
             
-            // Set borders
+            // Set borders - when enabled, border shows on focus
             testCells[i].setBordersEnabled(borders[i]);
             
             scene.add(testCells[i]);
         }
         
-        // Menu button at bottom
+        // Set up 2x2 grid navigation between test cells
+        // Layout:  [0] [1]
+        //          [2] [3]
+        testCells[0].setFocusTraversal(testCells[2], testCells[2], testCells[1], testCells[1]);
+        testCells[1].setFocusTraversal(testCells[3], testCells[3], testCells[0], testCells[0]);
+        testCells[2].setFocusTraversal(testCells[0], testCells[0], testCells[3], testCells[3]);
+        testCells[3].setFocusTraversal(testCells[1], testCells[1], testCells[2], testCells[2]);
+        
+        // Menu button at bottom (outside the test grid)
         int buttonWidth = 150;
         int buttonHeight = 40;
         menuButton = new HTextButton("Menu", 
@@ -136,6 +157,12 @@ public class BackgroundBorderTestXlet implements Xlet, HActionListener {
         menuButton.setVerticalAlignment(HVisible.VALIGN_CENTER);
         menuButton.setActionCommand("menu");
         menuButton.addHActionListener(this);
+        
+        // Navigation: down from bottom row goes to menu, up from menu goes to bottom row
+        testCells[2].setFocusTraversal(testCells[0], menuButton, testCells[3], testCells[3]);
+        testCells[3].setFocusTraversal(testCells[1], menuButton, testCells[2], testCells[2]);
+        menuButton.setFocusTraversal(testCells[2], testCells[0], null, null);
+        
         scene.add(menuButton);
 
         System.err.println("BackgroundBorderTestXlet: initXlet() complete");
@@ -144,8 +171,10 @@ public class BackgroundBorderTestXlet implements Xlet, HActionListener {
     public void startXlet() throws XletStateChangeException {
         System.err.println("BackgroundBorderTestXlet: startXlet()");
         scene.setVisible(true);
-        menuButton.requestFocus();
+        // Focus first test cell to immediately show border behavior
+        testCells[0].requestFocus();
         scene.repaint();
+        System.err.println("BackgroundBorderTestXlet: Navigate between cells to see borders appear/disappear");
     }
 
     public void pauseXlet() {
