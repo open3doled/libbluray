@@ -1,6 +1,7 @@
 /*
  * This file is part of libbluray
  * Copyright (C) 2010  William Hahne
+ * Copyright (C) 2026  libbluray project
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -20,130 +21,113 @@
 package org.havi.ui;
 
 import java.awt.Image;
+import java.awt.event.KeyEvent;
 
 import org.havi.ui.event.HActionEvent;
 import org.havi.ui.event.HActionListener;
 import org.havi.ui.event.HFocusEvent;
 import org.havi.ui.event.HFocusListener;
 
+import org.videolan.BDJXletContext;
+
 public class HGraphicButton extends HIcon implements HActionable {
+
+    private HActionableHelper actionHelper;
+
     public HGraphicButton() {
-        org.videolan.Logger.unimplemented(HGraphicButton.class.getName(), "");
+        super();
+        initAction();
     }
 
     public HGraphicButton(Image image, int x, int y, int width, int height) {
-        org.videolan.Logger.unimplemented(HGraphicButton.class.getName(), "");
+        super(image, x, y, width, height);
+        initAction();
     }
 
     public HGraphicButton(Image imageNormal, Image imageFocused,
             Image imageActioned, int x, int y, int width, int height) {
-        org.videolan.Logger.unimplemented(HGraphicButton.class.getName(), "");
+        super(imageNormal, imageFocused, x, y, width, height);
+        setGraphicContent(imageActioned, ACTIONED_STATE);
+        initAction();
     }
 
     public HGraphicButton(Image image) {
-        org.videolan.Logger.unimplemented(HGraphicButton.class.getName(), "");
+        super(image);
+        initAction();
     }
 
     public HGraphicButton(Image imageNormal, Image imageFocused,
             Image imageActioned) {
-        org.videolan.Logger.unimplemented(HGraphicButton.class.getName(), "");
+        this(imageNormal, imageFocused, imageActioned, 0, 0, 0, 0);
+    }
+
+    private void initAction() {
+        actionHelper = new HActionableHelper(this);
     }
 
     public static void setDefaultLook(HGraphicLook hlook) {
-        DefaultLook = hlook;
+        BDJXletContext.setXletDefaultLook(PROPERTY_LOOK, hlook);
     }
 
     public static HGraphicLook getDefaultLook() {
-        if (DefaultLook == null)
-            org.videolan.Logger.unimplemented("", "getDefaultLook");
-        return DefaultLook;
+        return (HGraphicLook)BDJXletContext.getXletDefaultLook(PROPERTY_LOOK, DEFAULT_LOOK);
     }
 
-    public void setMove(int keyCode, HNavigable target) {
-        org.videolan.Logger.unimplemented(HGraphicButton.class.getName(), "");
-    }
-
-    public HNavigable getMove(int keyCode) {
-        org.videolan.Logger.unimplemented(HGraphicButton.class.getName(), "");
-        return null;
-    }
-
-    public void setFocusTraversal(HNavigable up, HNavigable down,
-            HNavigable left, HNavigable right) {
-        org.videolan.Logger.unimplemented(HGraphicButton.class.getName(), "");
-    }
-
-    public boolean isSelected() {
-        org.videolan.Logger.unimplemented(HGraphicButton.class.getName(), "");
-        return false;
-    }
-
-    public void setGainFocusSound(HSound sound) {
-        org.videolan.Logger.unimplemented(HGraphicButton.class.getName(), "");
-    }
-
-    public void setLoseFocusSound(HSound sound) {
-        org.videolan.Logger.unimplemented(HGraphicButton.class.getName(), "");
-    }
-
-    public HSound getGainFocusSound() {
-        org.videolan.Logger.unimplemented(HGraphicButton.class.getName(), "");
-        return null;
-    }
-
-    public HSound getLoseFocusSound() {
-        org.videolan.Logger.unimplemented(HGraphicButton.class.getName(), "");
-        return null;
-    }
-
-    public void addHFocusListener(HFocusListener l) {
-        org.videolan.Logger.unimplemented(HGraphicButton.class.getName(), "");
-    }
-
-    public void removeHFocusListener(HFocusListener l) {
-        org.videolan.Logger.unimplemented(HGraphicButton.class.getName(), "");
-    }
-
-    public int[] getNavigationKeys() {
-        org.videolan.Logger.unimplemented(HGraphicButton.class.getName(), "");
-        return null;
-    }
-
-    public void processHFocusEvent(HFocusEvent evt) {
-        org.videolan.Logger.unimplemented(HGraphicButton.class.getName(), "");
-    }
+    // --- HActionable implementation ---
 
     public void addHActionListener(HActionListener l) {
-        org.videolan.Logger.unimplemented(HGraphicButton.class.getName(), "");
+        actionHelper.addHActionListener(l);
     }
 
     public void removeHActionListener(HActionListener l) {
-        org.videolan.Logger.unimplemented(HGraphicButton.class.getName(), "");
+        actionHelper.removeHActionListener(l);
     }
 
     public void setActionCommand(String command) {
-        org.videolan.Logger.unimplemented(HGraphicButton.class.getName(), "");
+        actionHelper.setActionCommand(command);
     }
 
     public void setActionSound(HSound sound) {
-        org.videolan.Logger.unimplemented(HGraphicButton.class.getName(), "");
+        actionHelper.setActionSound(sound);
     }
 
     public HSound getActionSound() {
-        org.videolan.Logger.unimplemented(HGraphicButton.class.getName(), "");
-        return null;
+        return actionHelper.getActionSound();
     }
 
     public void processHActionEvent(HActionEvent evt) {
-        org.videolan.Logger.unimplemented(HGraphicButton.class.getName(), "");
+        int state = getInteractionState();
+        int newState = actionHelper.processHActionEvent(evt);
+
+        if (state != newState) {
+            setInteractionState(newState);
+        }
     }
 
     public String getActionCommand() {
-        org.videolan.Logger.unimplemented(HGraphicButton.class.getName(), "");
-        return "";
+        return actionHelper.getActionCommand();
     }
 
-    private static HGraphicLook DefaultLook = null;
+    // HNavigable methods are inherited from HIcon
+    // Focus handling is inherited from HIcon
+
+    /**
+     * Process key events for HAVI navigation and action.
+     * Handles ENTER via actionHelper, delegates navigation to parent.
+     */
+    protected void processKeyEvent(KeyEvent e) {
+        // Let actionHelper handle ENTER key
+        if (actionHelper.processKeyEvent(e)) {
+            e.consume();
+            return;
+        }
+
+        // Delegate navigation (arrows) to parent HIcon
+        super.processKeyEvent(e);
+    }
+
+    static final Class DEFAULT_LOOK = HGraphicLook.class;
+    private static final String PROPERTY_LOOK = HGraphicButton.class.getName();
 
     private static final long serialVersionUID = 5167775411684840800L;
 }
