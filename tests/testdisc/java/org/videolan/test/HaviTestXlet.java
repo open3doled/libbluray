@@ -27,6 +27,7 @@ import org.havi.ui.HSceneFactory;
 import org.havi.ui.HStaticIcon;
 import org.havi.ui.HStaticText;
 import org.havi.ui.HTextButton;
+import org.havi.ui.HVisible;
 import org.havi.ui.event.HActionListener;
 
 /**
@@ -182,24 +183,32 @@ public class HaviTestXlet implements Xlet, HActionListener {
         text1.setForeground(Color.WHITE);
         text1.setBackground(new Color(0, 100, 0)); // Dark green background
         text1.setFont(textFont);
+        text1.setHorizontalAlignment(HVisible.HALIGN_CENTER);
+        text1.setVerticalAlignment(HVisible.VALIGN_CENTER);
         text1.setVisible(true);
 
         text2 = new HStaticText("Text 2", textColX2, textRowY1, TEXT_WIDTH, TEXT_HEIGHT);
         text2.setForeground(Color.WHITE);
         text2.setBackground(new Color(150, 150, 0)); // Dark yellow background
         text2.setFont(textFont);
+        text2.setHorizontalAlignment(HVisible.HALIGN_CENTER);
+        text2.setVerticalAlignment(HVisible.VALIGN_CENTER);
         text2.setVisible(true);
 
         text3 = new HStaticText("Text 3", textColX1, textRowY2, TEXT_WIDTH, TEXT_HEIGHT);
         text3.setForeground(Color.WHITE);
         text3.setBackground(new Color(0, 100, 100)); // Dark cyan background
         text3.setFont(textFont);
+        text3.setHorizontalAlignment(HVisible.HALIGN_CENTER);
+        text3.setVerticalAlignment(HVisible.VALIGN_CENTER);
         text3.setVisible(true);
 
         text4 = new HStaticText("Text 4", textColX2, textRowY2, TEXT_WIDTH, TEXT_HEIGHT);
         text4.setForeground(Color.WHITE);
         text4.setBackground(new Color(100, 0, 100)); // Dark magenta background
         text4.setFont(textFont);
+        text4.setHorizontalAlignment(HVisible.HALIGN_CENTER);
+        text4.setVerticalAlignment(HVisible.VALIGN_CENTER);
         text4.setVisible(true);
 
         // Calculate positions for 2x2 text button grid (right side, below static texts)
@@ -213,6 +222,8 @@ public class HaviTestXlet implements Xlet, HActionListener {
         textButton1.setFont(textFont);
         textButton1.setForeground(Color.WHITE);
         textButton1.setBackground(Color.DARK_GRAY);
+        textButton1.setHorizontalAlignment(HVisible.HALIGN_CENTER);
+        textButton1.setVerticalAlignment(HVisible.VALIGN_CENTER);
         textButton1.setActionCommand("toggle_text1");
         textButton1.addHActionListener(this);
 
@@ -220,6 +231,8 @@ public class HaviTestXlet implements Xlet, HActionListener {
         textButton2.setFont(textFont);
         textButton2.setForeground(Color.WHITE);
         textButton2.setBackground(Color.DARK_GRAY);
+        textButton2.setHorizontalAlignment(HVisible.HALIGN_CENTER);
+        textButton2.setVerticalAlignment(HVisible.VALIGN_CENTER);
         textButton2.setActionCommand("toggle_text2");
         textButton2.addHActionListener(this);
 
@@ -227,6 +240,8 @@ public class HaviTestXlet implements Xlet, HActionListener {
         textButton3.setFont(textFont);
         textButton3.setForeground(Color.WHITE);
         textButton3.setBackground(Color.DARK_GRAY);
+        textButton3.setHorizontalAlignment(HVisible.HALIGN_CENTER);
+        textButton3.setVerticalAlignment(HVisible.VALIGN_CENTER);
         textButton3.setActionCommand("toggle_text3");
         textButton3.addHActionListener(this);
 
@@ -234,6 +249,8 @@ public class HaviTestXlet implements Xlet, HActionListener {
         textButton4.setFont(textFont);
         textButton4.setForeground(Color.WHITE);
         textButton4.setBackground(Color.DARK_GRAY);
+        textButton4.setHorizontalAlignment(HVisible.HALIGN_CENTER);
+        textButton4.setVerticalAlignment(HVisible.VALIGN_CENTER);
         textButton4.setActionCommand("toggle_text4");
         textButton4.addHActionListener(this);
 
