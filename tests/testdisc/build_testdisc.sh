@@ -122,8 +122,8 @@ echo ""
 echo "Step 3: Creating JAR file..."
 
 cd "$BUILD_DIR"
-# Include all compiled xlet classes in the JAR
-jar cf "$OUTPUT_DIR/BDMV/JAR/00000.jar" org/videolan/test/*Xlet.class
+# Include all compiled xlet classes and their inner classes in the JAR
+jar cf "$OUTPUT_DIR/BDMV/JAR/00000.jar" org/videolan/test/*.class
 
 echo "Created: $OUTPUT_DIR/BDMV/JAR/00000.jar"
 echo "JAR contents:"

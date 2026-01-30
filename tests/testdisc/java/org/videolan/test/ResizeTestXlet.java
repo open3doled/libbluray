@@ -38,9 +38,12 @@ import org.havi.ui.event.HActionListener;
  * Tests resize modes for image rendering.
  * 
  * Shows the same source image with different resize modes:
- * - RESIZE_NONE: Image displayed at original size
- * - RESIZE_PRESERVE_ASPECT: Image scaled to fit, maintaining aspect ratio
- * - RESIZE_ARBITRARY: Image stretched to fill container
+ * - RESIZE_NONE: Image displayed at original size (IMPLEMENTED)
+ * - RESIZE_PRESERVE_ASPECT: Image scaled to fit, maintaining aspect ratio (NOT IMPLEMENTED)
+ * - RESIZE_ARBITRARY: Image stretched to fill container (NOT IMPLEMENTED)
+ * 
+ * Note: Per HAVI spec, scaling is optional. Currently only RESIZE_NONE is implemented.
+ * RESIZE_PRESERVE_ASPECT and RESIZE_ARBITRARY fall back to RESIZE_NONE behavior.
  */
 public class ResizeTestXlet implements Xlet, HActionListener {
 
@@ -83,7 +86,7 @@ public class ResizeTestXlet implements Xlet, HActionListener {
         
         // Source image info
         HStaticText sourceInfo = new HStaticText(
-            "Source image: " + IMG_WIDTH + "x" + IMG_HEIGHT + " pixels, Container: " + BOX_WIDTH + "x" + BOX_HEIGHT,
+            "Source: " + IMG_WIDTH + "x" + IMG_HEIGHT + " px, Container: " + BOX_WIDTH + "x" + BOX_HEIGHT + " px (scaling optional per HAVI spec)",
             0, 50, sceneWidth, 25);
         sourceInfo.setFont(labelFont);
         sourceInfo.setForeground(Color.LIGHT_GRAY);
@@ -122,11 +125,11 @@ public class ResizeTestXlet implements Xlet, HActionListener {
             scene.add(icon);
         }
         
-        // Description of expected behavior
+        // Description of expected behavior (noting implementation status)
         String[] descriptions = {
-            "Original size,\ncentered",
-            "Scaled to fit,\naspect preserved",
-            "Stretched to\nfill container"
+            "Original size,\ncentered\n(implemented)",
+            "Scaled to fit,\naspect preserved\n(NOT implemented)",
+            "Stretched to fill\ncontainer\n(NOT implemented)"
         };
         
         for (int i = 0; i < 3; i++) {

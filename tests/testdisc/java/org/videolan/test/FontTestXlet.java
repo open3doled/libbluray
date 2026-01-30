@@ -37,7 +37,8 @@ import org.havi.ui.event.HActionListener;
  * Shows text with various:
  * - Font families (SansSerif, Serif, Monospaced)
  * - Font styles (Plain, Bold, Italic, Bold+Italic)
- * - Font sizes (12, 18, 24, 36)
+ * - Font sizes (14, 20, 28)
+ * - Text overflow/clipping with different alignments
  */
 public class FontTestXlet implements Xlet, HActionListener {
 
@@ -132,6 +133,75 @@ public class FontTestXlet implements Xlet, HActionListener {
             scene.add(sizeText);
             
             x += 150;
+        }
+        
+        // Add text overflow/clipping test section
+        y += 60;
+        HStaticText overflowLabel = new HStaticText("Text overflow (36pt in small box, different alignments):", 10, y, sceneWidth - 20, 25);
+        overflowLabel.setFont(new Font("SansSerif", Font.PLAIN, 16));
+        overflowLabel.setForeground(Color.YELLOW);
+        overflowLabel.setHorizontalAlignment(HVisible.HALIGN_LEFT);
+        scene.add(overflowLabel);
+        y += 30;
+        
+        // Overflow test boxes - large font in small containers
+        Font overflowFont = new Font("SansSerif", Font.BOLD, 36);
+        int boxWidth = 150;
+        int boxHeight = 50;
+        int boxGap = 30;
+        String overflowText = "Overflow Text";
+        
+        int[] hAligns = { HVisible.HALIGN_LEFT, HVisible.HALIGN_CENTER, HVisible.HALIGN_RIGHT };
+        String[] hAlignNames = { "LEFT", "CENTER", "RIGHT" };
+        
+        int overflowX = 30;
+        for (int i = 0; i < hAligns.length; i++) {
+            // Label above box
+            HStaticText alignLabel = new HStaticText(hAlignNames[i], overflowX, y, boxWidth, 20);
+            alignLabel.setFont(new Font("SansSerif", Font.PLAIN, 14));
+            alignLabel.setForeground(Color.GRAY);
+            alignLabel.setHorizontalAlignment(HVisible.HALIGN_CENTER);
+            scene.add(alignLabel);
+            
+            // Overflow box with background to show bounds
+            HStaticText overflowBox = new HStaticText(overflowText, overflowX, y + 22, boxWidth, boxHeight);
+            overflowBox.setFont(overflowFont);
+            overflowBox.setForeground(Color.WHITE);
+            overflowBox.setBackground(new Color(60, 60, 80));
+            overflowBox.setBackgroundMode(HVisible.BACKGROUND_FILL);
+            overflowBox.setHorizontalAlignment(hAligns[i]);
+            overflowBox.setVerticalAlignment(HVisible.VALIGN_CENTER);
+            scene.add(overflowBox);
+            
+            overflowX += boxWidth + boxGap;
+        }
+        
+        // Also test vertical overflow - use much larger font (72pt) in small boxes
+        overflowX += 50;
+        Font tallFont = new Font("SansSerif", Font.BOLD, 72);  // Double size for obvious overflow
+        int[] vAligns = { HVisible.VALIGN_TOP, HVisible.VALIGN_CENTER, HVisible.VALIGN_BOTTOM };
+        String[] vAlignNames = { "TOP", "V_CENTER", "BOTTOM" };
+        int tallBoxHeight = 50;  // Much shorter than 72pt font height
+        
+        for (int i = 0; i < vAligns.length; i++) {
+            // Label above box
+            HStaticText alignLabel = new HStaticText(vAlignNames[i], overflowX, y, boxWidth, 20);
+            alignLabel.setFont(new Font("SansSerif", Font.PLAIN, 14));
+            alignLabel.setForeground(Color.GRAY);
+            alignLabel.setHorizontalAlignment(HVisible.HALIGN_CENTER);
+            scene.add(alignLabel);
+            
+            // Overflow box - 72pt text in 50px tall container
+            HStaticText overflowBox = new HStaticText("Tall", overflowX, y + 22, 100, tallBoxHeight);
+            overflowBox.setFont(tallFont);
+            overflowBox.setForeground(Color.WHITE);
+            overflowBox.setBackground(new Color(80, 60, 60));
+            overflowBox.setBackgroundMode(HVisible.BACKGROUND_FILL);
+            overflowBox.setHorizontalAlignment(HVisible.HALIGN_CENTER);
+            overflowBox.setVerticalAlignment(vAligns[i]);
+            scene.add(overflowBox);
+            
+            overflowX += 120;
         }
         
         // Menu button at bottom
