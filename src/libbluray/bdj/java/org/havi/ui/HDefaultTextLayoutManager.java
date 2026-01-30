@@ -114,17 +114,17 @@ public class HDefaultTextLayoutManager implements HTextLayoutManager {
             switch (v.getVerticalAlignment()) {
 
             case HVisible.VALIGN_TOP:
-                y = insets.top + ascent + descent + i * stringHeight;
+                y = insets.top + ascent + i * stringHeight;
                 break;
             case HVisible.VALIGN_BOTTOM:
                 y = v.getHeight() - insets.bottom - textHeight +
-                    ascent + descent + i * stringHeight;
+                    ascent + i * stringHeight;
                 break;
             case HVisible.VALIGN_CENTER:
             case HVisible.VALIGN_JUSTIFY:
                 y = insets.top +
                     (v.getHeight() - insets.top - insets.bottom - textHeight) / 2 +
-                    ascent + descent + i * stringHeight;
+                    ascent + i * stringHeight;
                 break;
             }
 

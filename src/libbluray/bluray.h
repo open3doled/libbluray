@@ -238,6 +238,11 @@ typedef enum {
     BLURAY_DYNAMIC_RANGE_DOLBY_VISION = 2
 } bd_dynamic_range_type_e;
 
+typedef enum {
+    BLURAY_COLOR_SPACE_BT709  = 1,
+    BLURAY_COLOR_SPACE_BT2020 = 2
+} bd_color_space_e;
+
 /** Clip substream information */
 typedef struct bd_stream_info {
     uint8_t     coding_type;  /**< Stream coding (\ref bd_stream_type_e) */
@@ -248,6 +253,10 @@ typedef struct bd_stream_info {
     uint16_t    pid;          /**< mpeg-ts PID */
     uint8_t     aspect;       /**< Stream video aspect ratio (\ref bd_video_aspect_e) */
     uint8_t     subpath_id;   /**< Sub path identifier (= separate mpeg-ts mux / .m2ts file) */
+    uint8_t     dynamic_range_type;
+    uint8_t     color_space;
+    uint8_t     cr_flag;
+    uint8_t     hdr_plus_flag;
 } BLURAY_STREAM_INFO;
 
 /** Clip information */
@@ -261,12 +270,14 @@ typedef struct bd_clip {
     uint8_t            ig_stream_count;         /**< Number of IG (Interactive Graphics) streams */
     uint8_t            sec_audio_stream_count;  /**< Number of secondary audio streams */
     uint8_t            sec_video_stream_count;  /**< Number of secondary video streams */
+    uint8_t            dv_stream_count;
     BLURAY_STREAM_INFO *video_streams;          /**< Video streams information */
     BLURAY_STREAM_INFO *audio_streams;          /**< Audio streams information */
     BLURAY_STREAM_INFO *pg_streams;             /**< PG (Presentation Graphics) streams information */
     BLURAY_STREAM_INFO *ig_streams;             /**< IG (Interactive Graphics) streams information */
     BLURAY_STREAM_INFO *sec_audio_streams;      /**< Secondary audio streams information */
     BLURAY_STREAM_INFO *sec_video_streams;      /**< Secondary video streams information */
+    BLURAY_STREAM_INFO *dv_streams;
 
     uint64_t           start_time;  /**< start media time, 90kHz, ("playlist time") */
     uint64_t           in_time;     /**< start timestamp, 90kHz */
@@ -307,6 +318,7 @@ typedef struct bd_title_info {
     BLURAY_TITLE_MARK    *marks;         /**< Playmark information */
 
     uint8_t              mvc_base_view_r_flag;  /**< MVC base view (0 - left, 1 - right) */
+    uint8_t              sdr_conversion_notification_flag;
 } BLURAY_TITLE_INFO;
 
 /** Sound effect data */

@@ -2818,10 +2818,15 @@ static int _copy_streams(const NAV_CLIP *clip, BLURAY_STREAM_INFO **pstreams,
         memcpy(streams[ii].lang, si[ii].lang, 4);
         streams[ii].pid = si[ii].pid;
         streams[ii].aspect = nav_clip_lookup_aspect(clip, si[ii].pid);
-        if ((si->stream_type == 2) || (si->stream_type == 3))
+        if ((si->stream_type == 2) || (si->stream_type == 3) || (si->stream_type == 4)) {
             streams[ii].subpath_id = si->subpath_id;
-        else
+        } else {
             streams[ii].subpath_id = -1;
+        }
+        streams[ii].dynamic_range_type = si[ii].dynamic_range_type;
+        streams[ii].color_space = si[ii].color_space;
+        streams[ii].cr_flag = si[ii].cr_flag;
+        streams[ii].hdr_plus_flag = si[ii].hdr_plus_flag;
     }
 
     return 1;
@@ -2893,12 +2898,14 @@ static BLURAY_TITLE_INFO* _fill_title_info(NAV_TITLE* title, uint32_t title_idx,
             ci->ig_stream_count = pi->stn.num_ig;
             ci->sec_video_stream_count = pi->stn.num_secondary_video;
             ci->sec_audio_stream_count = pi->stn.num_secondary_audio;
+            ci->dv_stream_count = pi->stn.num_dv;
             if (!_copy_streams(nc, &ci->video_streams, pi->stn.video, ci->video_stream_count) ||
                 !_copy_streams(nc, &ci->audio_streams, pi->stn.audio, ci->audio_stream_count) ||
                 !_copy_streams(nc, &ci->pg_streams, pi->stn.pg, ci->pg_stream_count) ||
                 !_copy_streams(nc, &ci->ig_streams, pi->stn.ig, ci->ig_stream_count) ||
                 !_copy_streams(nc, &ci->sec_video_streams, pi->stn.secondary_video, ci->sec_video_stream_count) ||
-                !_copy_streams(nc, &ci->sec_audio_streams, pi->stn.secondary_audio, ci->sec_audio_stream_count)) {
+                !_copy_streams(nc, &ci->sec_audio_streams, pi->stn.secondary_audio, ci->sec_audio_stream_count) ||
+                !_copy_streams(nc, &ci->dv_streams, pi->stn.dv, ci->dv_stream_count)) {
 
                 goto error;
             }
@@ -2906,6 +2913,7 @@ static BLURAY_TITLE_INFO* _fill_title_info(NAV_TITLE* title, uint32_t title_idx,
     }
 
     title_info->mvc_base_view_r_flag = title->pl->app_info.mvc_base_view_r_flag;
+    title_info->sdr_conversion_notification_flag = title->pl->app_info.sdr_conversion_notification_flag;
 
     return title_info;
 
@@ -2993,6 +3001,7 @@ void bd_free_title_info(BLURAY_TITLE_INFO *title_info)
                 X_FREE(title_info->clips[ii].ig_streams);
                 X_FREE(title_info->clips[ii].sec_video_streams);
                 X_FREE(title_info->clips[ii].sec_audio_streams);
+                X_FREE(title_info->clips[ii].dv_streams);
             }
             X_FREE(title_info->clips);
         }
