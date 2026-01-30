@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  BDJO configuration for Menu Xlet (Title 0)
-  Main menu for selecting test xlets
+  BDJO configuration for Font Test Xlet (Title 4)
+  Tests different font families, styles, and sizes
 -->
 <bdjo>
     <version>V_0200</version>
@@ -25,13 +25,13 @@
         <applications>
             <controlCode>1</controlCode>
             <organizationId>0x7fff0001</organizationId>
-            <applicationId>0x4000</applicationId>
+            <applicationId>0x4004</applicationId>
             <type>0x1</type>
             <applicationDescriptor>
                 <priority>128</priority>
                 <binding>TITLE_BOUND_DISC_BOUND</binding>
                 <visibility>V_11</visibility>
-                <initialClassName>org.videolan.test.MenuXlet</initialClassName>
+                <initialClassName>org.videolan.test.FontTestXlet</initialClassName>
                 <baseDirectory>00000</baseDirectory>
                 <classpathExtension></classpathExtension>
                 <profiles>

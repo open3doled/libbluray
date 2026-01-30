@@ -11,6 +11,8 @@
 package org.videolan.test;
 
 import java.io.*;
+import java.util.ArrayList;
+import java.util.List;
 import javax.xml.parsers.*;
 import org.w3c.dom.*;
 
@@ -23,15 +25,27 @@ import org.w3c.dom.*;
  * 
  * Supported features:
  *   - BD-J objects for firstPlayback, topMenu, and titles
- *   - Single title (title 1)
+ *   - Multiple titles (for test disc menu navigation)
  * 
  * Unsupported features (will error):
  *   - HDMV (movie) objects
- *   - Multiple titles
  *   - appInfo (video format, frame rate, etc.)
  *   - extensionData
  */
 public class IndexXmlParser {
+    
+    /**
+     * Represents a title entry with its BDJO file name and access type.
+     */
+    private static class TitleEntry {
+        String bdjoFileName;
+        int accessType;
+        
+        TitleEntry(String bdjoFileName, int accessType) {
+            this.bdjoFileName = bdjoFileName;
+            this.accessType = accessType;
+        }
+    }
     
     private Document doc;
     private String sourceFile;
@@ -40,8 +54,7 @@ public class IndexXmlParser {
     private String version = "0200";
     private String firstPlaybackBdjo = null;
     private String topMenuBdjo = null;
-    private String title1Bdjo = null;
-    private int title1AccessType = 1;  // V_01
+    private List<TitleEntry> titles = new ArrayList<TitleEntry>();
     
     public IndexXmlParser(File xmlFile) throws Exception {
         this.sourceFile = xmlFile.getAbsolutePath();
@@ -72,12 +85,6 @@ public class IndexXmlParser {
         // HDMV objects
         if (hasElement("hdmvObject")) {
             unsupported("<hdmvObject> (HDMV/movie objects - only BD-J objects supported)");
-        }
-        
-        // Multiple titles
-        NodeList titles = doc.getElementsByTagName("title");
-        if (titles.getLength() > 1) {
-            unsupported("Multiple <title> elements (only single title supported)");
         }
         
         // appInfo
@@ -163,31 +170,42 @@ public class IndexXmlParser {
             }
         }
         
-        // Titles
-        Element titles = getFirstChildElement(indexes, "titles");
-        if (titles != null) {
-            Element title = getFirstChildElement(titles, "title");
-            if (title != null) {
-                Element bdjObj = getFirstChildElement(title, "bdjObject");
-                if (bdjObj != null) {
-                    title1Bdjo = getChildText(bdjObj, "bdjoFileName");
-                } else {
-                    // Check for indexObject (generic) or hdmvObject
-                    Element indexObj = getFirstChildElement(title, "indexObject");
-                    if (indexObj != null) {
-                        // Could be either type, check for bdjoFileName
-                        String bdjo = getChildText(indexObj, "bdjoFileName");
-                        if (bdjo != null) {
-                            title1Bdjo = bdjo;
-                        } else {
-                            unsupported("<indexObject> without <bdjoFileName> (HDMV objects)");
+        // Titles - parse all title elements
+        Element titlesElement = getFirstChildElement(indexes, "titles");
+        if (titlesElement != null) {
+            NodeList titleNodes = titlesElement.getChildNodes();
+            for (int i = 0; i < titleNodes.getLength(); i++) {
+                Node titleNode = titleNodes.item(i);
+                if (titleNode.getNodeType() == Node.ELEMENT_NODE && "title".equals(titleNode.getNodeName())) {
+                    Element title = (Element) titleNode;
+                    String bdjoFileName = null;
+                    int accessType = 1;  // Default V_01
+                    
+                    Element bdjObj = getFirstChildElement(title, "bdjObject");
+                    if (bdjObj != null) {
+                        bdjoFileName = getChildText(bdjObj, "bdjoFileName");
+                    } else {
+                        // Check for indexObject (generic) or hdmvObject
+                        Element indexObj = getFirstChildElement(title, "indexObject");
+                        if (indexObj != null) {
+                            // Could be either type, check for bdjoFileName
+                            String bdjo = getChildText(indexObj, "bdjoFileName");
+                            if (bdjo != null) {
+                                bdjoFileName = bdjo;
+                            } else {
+                                unsupported("<indexObject> without <bdjoFileName> (HDMV objects)");
+                            }
                         }
                     }
-                }
-                
-                String accessType = getChildText(title, "titleAccessType");
-                if (accessType != null) {
-                    title1AccessType = parseTitleAccessType(accessType);
+                    
+                    String accessTypeStr = getChildText(title, "titleAccessType");
+                    if (accessTypeStr != null) {
+                        accessType = parseTitleAccessType(accessTypeStr);
+                    }
+                    
+                    if (bdjoFileName != null) {
+                        titles.add(new TitleEntry(bdjoFileName, accessType));
+                    }
                 }
             }
         }
@@ -196,6 +214,8 @@ public class IndexXmlParser {
         if (firstPlaybackBdjo == null) {
             throw new Exception("Missing <firstPlayback><bdjObject><bdjoFileName> in " + sourceFile);
         }
+        
+        System.out.println("Parsed " + titles.size() + " title(s) from " + sourceFile);
     }
     
     private int parseTitleAccessType(String type) {
@@ -294,12 +314,11 @@ public class IndexXmlParser {
         writeTopMenu(out, topMenuBdjo != null ? topMenuBdjo : firstPlaybackBdjo);
         
         // Number of titles
-        int numTitles = (title1Bdjo != null) ? 1 : 0;
-        out.writeShort(numTitles);
+        out.writeShort(titles.size());
         
         // Title entries
-        if (title1Bdjo != null) {
-            writeTitle(out, title1Bdjo, title1AccessType);
+        for (TitleEntry title : titles) {
+            writeTitle(out, title.bdjoFileName, title.accessType);
         }
         
         // Calculate and update indexes length

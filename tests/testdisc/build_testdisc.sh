@@ -57,10 +57,10 @@ javac -d "$TOOLS_BUILD" \
 
 echo "Build tools compiled."
 
-# Step 2: Compile the test Xlet
+# Step 2: Compile all test Xlets
 # First, try to find libbluray.jar (from build directory or system)
 echo ""
-echo "Step 2: Compiling test Xlet..."
+echo "Step 2: Compiling all test Xlets..."
 
 LIBBLURAY_JAR=""
 # Try to find libbluray.jar from build directory
@@ -73,15 +73,20 @@ for jar in "$REPO_ROOT/build/src/libbluray/bdj/libbluray-j2se"*.jar \
     fi
 done
 
+# Find all *Xlet.java files
+XLET_FILES=$(find "$TEST_SRC" -name "*Xlet.java" -type f)
+XLET_COUNT=$(echo "$XLET_FILES" | wc -l | tr -d ' ')
+echo "Found $XLET_COUNT Xlet file(s) to compile"
+
 if [ -n "$LIBBLURAY_JAR" ]; then
     echo "Using libbluray.jar: $LIBBLURAY_JAR"
     
-    # Compile the test Xlet against libbluray.jar
+    # Compile all test Xlets against libbluray.jar
     javac -source 1.8 -target 1.8 \
         -cp "$LIBBLURAY_JAR" \
         -d "$BUILD_DIR" \
         -Xlint:none \
-        "$TEST_SRC/org/videolan/test/HaviTestXlet.java" 2>&1
+        $XLET_FILES 2>&1
 else
     echo "No libbluray.jar found. Attempting source compilation..."
     
@@ -91,11 +96,13 @@ else
         -d "$BUILD_DIR" \
         -Xlint:none \
         -XDignore.symbol.file \
-        "$TEST_SRC/org/videolan/test/HaviTestXlet.java" 2>&1 || true
+        $XLET_FILES 2>&1 || true
 fi
 
-if [ ! -f "$BUILD_DIR/org/videolan/test/HaviTestXlet.class" ]; then
-    echo "Error: Failed to compile HaviTestXlet.java"
+# Check that at least one xlet compiled
+COMPILED_XLETS=$(find "$BUILD_DIR" -name "*Xlet.class" -type f 2>/dev/null | wc -l | tr -d ' ')
+if [ "$COMPILED_XLETS" -eq 0 ]; then
+    echo "Error: Failed to compile any Xlet files"
     echo ""
     echo "Please build libbluray first:"
     echo "  cd /path/to/libbluray"
@@ -107,29 +114,41 @@ if [ ! -f "$BUILD_DIR/org/videolan/test/HaviTestXlet.class" ]; then
     exit 1
 fi
 
-echo "Test Xlet compiled."
+echo "Compiled $COMPILED_XLETS Xlet class(es)."
 
-# Step 3: Create the JAR file containing ONLY the test Xlet
+# Step 3: Create the JAR file containing ALL test Xlets
 # The HAVI classes are provided by libbluray.jar at runtime
 echo ""
 echo "Step 3: Creating JAR file..."
 
 cd "$BUILD_DIR"
-jar cf "$OUTPUT_DIR/BDMV/JAR/00000.jar" org/videolan/test/HaviTestXlet.class
+# Include all compiled xlet classes in the JAR
+jar cf "$OUTPUT_DIR/BDMV/JAR/00000.jar" org/videolan/test/*Xlet.class
 
 echo "Created: $OUTPUT_DIR/BDMV/JAR/00000.jar"
+echo "JAR contents:"
 jar tf "$OUTPUT_DIR/BDMV/JAR/00000.jar"
 
-# Step 4: Generate BDJO file from XML config
+# Step 4: Generate all BDJO files from XML configs
 echo ""
-echo "Step 4: Generating BDJO file from XML config..."
-echo "Using XML config: $CONFIG_DIR/00000.bdjo.xml"
-java -cp "$TOOLS_BUILD" org.videolan.test.BdjoXmlParser \
-    "$CONFIG_DIR/00000.bdjo.xml" \
-    "$OUTPUT_DIR/BDMV/BDJO/00000.bdjo"
+echo "Step 4: Generating BDJO files from XML configs..."
 
-# Copy to backup
-cp "$OUTPUT_DIR/BDMV/BDJO/00000.bdjo" "$OUTPUT_DIR/BDMV/BACKUP/BDJO/"
+BDJO_COUNT=0
+for bdjo_xml in "$CONFIG_DIR"/*.bdjo.xml; do
+    if [ -f "$bdjo_xml" ]; then
+        bdjo_name=$(basename "$bdjo_xml" .bdjo.xml)
+        echo "  Processing: $bdjo_xml -> ${bdjo_name}.bdjo"
+        java -cp "$TOOLS_BUILD" org.videolan.test.BdjoXmlParser \
+            "$bdjo_xml" \
+            "$OUTPUT_DIR/BDMV/BDJO/${bdjo_name}.bdjo"
+        
+        # Copy to backup
+        cp "$OUTPUT_DIR/BDMV/BDJO/${bdjo_name}.bdjo" "$OUTPUT_DIR/BDMV/BACKUP/BDJO/"
+        BDJO_COUNT=$((BDJO_COUNT + 1))
+    fi
+done
+
+echo "Generated $BDJO_COUNT BDJO file(s)."
 
 # Step 5: Generate index.bdmv from XML config
 echo ""
@@ -166,9 +185,12 @@ echo ""
 echo "Disc structure created at: $OUTPUT_DIR"
 echo ""
 echo "Configuration files used:"
-echo "  BDJO: $CONFIG_DIR/00000.bdjo.xml"
+echo "  BDJO configs: $CONFIG_DIR/*.bdjo.xml"
 echo "  Index: $CONFIG_DIR/index.xml"
 echo "  MovieObject: $CONFIG_DIR/movieobject.xml"
+echo ""
+echo "Xlets compiled: $COMPILED_XLETS"
+echo "BDJO files generated: $BDJO_COUNT"
 echo ""
 echo "Directory contents:"
 find "$OUTPUT_DIR" -type f | sort | while read f; do
