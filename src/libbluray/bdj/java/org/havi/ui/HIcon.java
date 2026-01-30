@@ -1,6 +1,7 @@
 /*
  * This file is part of libbluray
  * Copyright (C) 2010  William Hahne
+ * Copyright (C) 2026  libbluray project
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -19,30 +20,47 @@
 
 package org.havi.ui;
 
+import java.awt.Component;
 import java.awt.Image;
+import java.awt.event.FocusEvent;
+import java.awt.event.FocusListener;
+import java.awt.event.KeyEvent;
 
+import org.havi.ui.event.HActionEvent;
 import org.havi.ui.event.HFocusEvent;
 import org.havi.ui.event.HFocusListener;
 
 import org.videolan.BDJXletContext;
-import org.videolan.Logger;
 
 public class HIcon extends HStaticIcon implements HNavigable {
+
+    private HNavigableHelper helper;
+
     public HIcon() {
-        org.videolan.Logger.unimplemented(HIcon.class.getName(), "");
+        super();
+        init();
     }
 
     public HIcon(Image image) {
-        org.videolan.Logger.unimplemented(HIcon.class.getName(), "");
+        super(image);
+        init();
     }
 
     public HIcon(Image image, int x, int y, int width, int height) {
-        org.videolan.Logger.unimplemented(HIcon.class.getName(), "");
+        super(image, x, y, width, height);
+        init();
     }
 
-    public HIcon(Image imageNormal, Image imageFocus, int x, int y, int width,
-            int height) {
-        org.videolan.Logger.unimplemented(HIcon.class.getName(), "");
+    public HIcon(Image imageNormal, Image imageFocus, int x, int y, int width, int height) {
+        super(imageNormal, x, y, width, height);
+        setGraphicContent(imageFocus, FOCUSED_STATE);
+        init();
+    }
+
+    private void init() {
+        helper = new HNavigableHelper(this);
+        // Enable key and focus events so processKeyEvent/processFocusEvent are called
+        enableEvents(java.awt.AWTEvent.KEY_EVENT_MASK | java.awt.AWTEvent.FOCUS_EVENT_MASK);
     }
 
     public static void setDefaultLook(HGraphicLook hlook) {
@@ -53,58 +71,103 @@ public class HIcon extends HStaticIcon implements HNavigable {
         return (HGraphicLook)BDJXletContext.getXletDefaultLook(PROPERTY_LOOK, DEFAULT_LOOK);
     }
 
+    // --- HNavigable implementation ---
+
     public void setMove(int keyCode, HNavigable target) {
-        Logger.unimplemented("", "");
+        helper.setMove(keyCode, target);
     }
 
     public HNavigable getMove(int keyCode) {
-        Logger.unimplemented("", "");
-        return null;
+        return helper.getMove(keyCode);
     }
 
     public void setFocusTraversal(HNavigable up, HNavigable down,
             HNavigable left, HNavigable right) {
-        Logger.unimplemented("", "");
+        helper.setFocusTraversal(up, down, left, right);
     }
 
     public boolean isSelected() {
-        Logger.unimplemented("", "");
-        return false;
+        return helper.isSelected();
     }
 
     public void setGainFocusSound(HSound sound) {
-        Logger.unimplemented("", "");
+        helper.setGainFocusSound(sound);
     }
 
     public void setLoseFocusSound(HSound sound) {
-        Logger.unimplemented("", "");
+        helper.setLoseFocusSound(sound);
     }
 
     public HSound getGainFocusSound() {
-        Logger.unimplemented("", "");
-        return null;
+        return helper.getGainFocusSound();
     }
 
     public HSound getLoseFocusSound() {
-        Logger.unimplemented("", "");
-        return null;
+        return helper.getLoseFocusSound();
     }
 
     public void addHFocusListener(HFocusListener l) {
-        Logger.unimplemented("", "");
+        helper.addHFocusListener(l);
     }
 
     public void removeHFocusListener(HFocusListener l) {
-        Logger.unimplemented("", "");
+        helper.removeHFocusListener(l);
     }
 
     public int[] getNavigationKeys() {
-        Logger.unimplemented("", "");
-        return null;
+        return helper.getNavigationKeys();
     }
 
+    // --- Focus event handling ---
+
+    /**
+     * Overridden from HVisible - HNavigable components are focus traversable.
+     */
+    public boolean isFocusTraversable() {
+        return true;
+    }
+
+    /**
+     * Override to return only user-registered listeners (excluding internal dummy).
+     */
+    public synchronized FocusListener[] getFocusListeners() {
+        return helper.getFocusListeners();
+    }
+
+    /**
+     * Override AWT focus processing to create HFocusEvent and delegate to processHFocusEvent.
+     * This is the bridge between AWT focus events and HAVI focus events.
+     */
+    protected void processFocusEvent(FocusEvent e) {
+        // Don't call super - we handle focus state ourselves via processHFocusEvent
+        HFocusEvent hEvent = new HFocusEvent(this, e.getID());
+        processHFocusEvent(hEvent);
+    }
+
+    /**
+     * Process HAVI focus events. Updates interaction state and notifies listeners.
+     */
     public void processHFocusEvent(HFocusEvent evt) {
-        Logger.unimplemented("", "");
+        int state = getInteractionState();
+        int newState = helper.processHFocusEvent(evt);
+
+        if (state != newState) {
+            setInteractionState(newState);
+        }
+    }
+
+    /**
+     * Process key events for HAVI navigation.
+     * Delegates to HNavigableHelper for arrow key handling.
+     */
+    protected void processKeyEvent(KeyEvent e) {
+        // Let helper handle navigation keys
+        if (helper.processKeyEvent(e)) {
+            e.consume();
+            return;
+        }
+
+        super.processKeyEvent(e);
     }
 
     static final Class DEFAULT_LOOK = HGraphicLook.class;
