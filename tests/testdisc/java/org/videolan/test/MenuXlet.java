@@ -54,12 +54,12 @@ public class MenuXlet implements Xlet, HActionListener {
     // Grid layout:  [Alignment]    [Background/Border]
     //               [States]       [Font]
     //               [Multiline]    [Resize]
-    //               [Color]        [empty]
+    //               [Color]        [Graphic States]
     private static final String[][] MENU_LABELS = {
         { "Alignment", "Background/Border" },
-        { "States", "Font" },
+        { "States (Text)", "Font" },
         { "Multiline", "Resize" },
-        { "Color", null }  // null = empty cell
+        { "Color", "States (Graphic)" }
     };
     
     // Title numbers corresponding to each menu item (row-major order)
@@ -67,7 +67,7 @@ public class MenuXlet implements Xlet, HActionListener {
         { 1, 2 },
         { 3, 4 },
         { 5, 6 },
-        { 7, -1 }  // -1 = no button
+        { 7, 8 }
     };
     
     // Layout constants
