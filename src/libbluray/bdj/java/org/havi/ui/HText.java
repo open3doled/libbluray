@@ -2,6 +2,7 @@
  * This file is part of libbluray
  * Copyright (C) 2010  William Hahne
  * Copyright (C) 2013  Petri Hintukainen <phintuka@users.sourceforge.net>
+ * Copyright (C) 2026  libbluray project
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -22,6 +23,7 @@ package org.havi.ui;
 
 import java.awt.Color;
 import java.awt.Font;
+import java.awt.event.KeyEvent;
 
 import org.havi.ui.event.HFocusEvent;
 import org.havi.ui.event.HFocusListener;
@@ -30,6 +32,9 @@ import org.videolan.BDJXletContext;
 import org.videolan.Logger;
 
 public class HText extends HStaticText implements HNavigable {
+
+    private HNavigableHelper helper;
+
     public HText() {
         this(null);
     }
@@ -61,6 +66,8 @@ public class HText extends HStaticText implements HNavigable {
             super.setTextContent(textFocus, DISABLED_FOCUSED_STATE);
             super.setTextContent(textFocus, DISABLED_ACTIONED_FOCUSED_STATE);
         }
+
+        init();
     }
 
     public HText(String text, Font font, Color foreground, Color background,
@@ -88,62 +95,80 @@ public class HText extends HStaticText implements HNavigable {
         setTextLayoutManager(tlm);
     }
 
+    private void init() {
+        helper = new HNavigableHelper(this);
+        // Enable key and focus events so processKeyEvent/processFocusEvent are called
+        enableEvents(java.awt.AWTEvent.KEY_EVENT_MASK | java.awt.AWTEvent.FOCUS_EVENT_MASK);
+    }
+
+    // --- HNavigable implementation ---
+
     public void setMove(int keyCode, HNavigable target) {
-        logger.unimplemented("setMove");
+        helper.setMove(keyCode, target);
     }
 
     public HNavigable getMove(int keyCode) {
-        logger.unimplemented("getMove");
-        return this;
-    }
-
-    public boolean isFocusable() {
-        return true;
+        return helper.getMove(keyCode);
     }
 
     public void setFocusTraversal(HNavigable up, HNavigable down,
             HNavigable left, HNavigable right) {
-        logger.unimplemented("setFocusTraversal");
+        helper.setFocusTraversal(up, down, left, right);
     }
 
     public boolean isSelected() {
-        logger.unimplemented("isSelected");
-        return false;
+        return helper.isSelected();
     }
 
     public void setGainFocusSound(HSound sound) {
-        logger.unimplemented("setGainFocusSound");
+        helper.setGainFocusSound(sound);
     }
 
     public void setLoseFocusSound(HSound sound) {
-        logger.unimplemented("setLoseFocusSound");
+        helper.setLoseFocusSound(sound);
     }
 
     public HSound getGainFocusSound() {
-        logger.unimplemented("getGainFocusSound");
-        return null;
+        return helper.getGainFocusSound();
     }
 
     public HSound getLoseFocusSound() {
-        logger.unimplemented("getLoseFocusSound");
-        return null;
+        return helper.getLoseFocusSound();
     }
 
     public void addHFocusListener(HFocusListener l) {
-        logger.unimplemented("addHFocusListener");
+        helper.addHFocusListener(l);
     }
 
     public void removeHFocusListener(HFocusListener l) {
-        logger.unimplemented("removeHFocusListener");
+        helper.removeHFocusListener(l);
     }
 
     public int[] getNavigationKeys() {
-        logger.unimplemented("getNavigationKeys");
-        return null;
+        return helper.getNavigationKeys();
     }
 
+    // --- Focus event handling ---
+
     public void processHFocusEvent(HFocusEvent evt) {
-        logger.unimplemented("processHFocusEvent");
+        int state = getInteractionState();
+        int newState = helper.processHFocusEvent(evt);
+
+        if (state != newState) {
+            setInteractionState(newState);
+        }
+    }
+
+    /**
+     * Process key events for HAVI navigation.
+     * Delegates to HNavigableHelper for arrow key handling.
+     */
+    protected void processKeyEvent(KeyEvent e) {
+        if (helper.processKeyEvent(e)) {
+            e.consume();
+            return;
+        }
+        super.processKeyEvent(e);
     }
 
     public static void setDefaultLook(HTextLook hlook) {
