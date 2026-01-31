@@ -41,8 +41,12 @@ public class HGraphicLook implements HExtendedLook {
             Color bg = visible.getBackground();
             if (bg != null) {
                 Dimension size = visible.getSize();
+                Insets insets = getInsets(visible);
                 g.setColor(bg);
-                g.fillRect(0, 0, size.width, size.height);
+                // Fill only the content area, not the border/inset area
+                g.fillRect(insets.left, insets.top,
+                    size.width - insets.left - insets.right,
+                    size.height - insets.top - insets.bottom);
             }
         }
     }
