@@ -20,13 +20,9 @@
 
 package org.havi.ui;
 
-import java.awt.Component;
 import java.awt.Image;
-import java.awt.event.FocusEvent;
-import java.awt.event.FocusListener;
 import java.awt.event.KeyEvent;
 
-import org.havi.ui.event.HActionEvent;
 import org.havi.ui.event.HFocusEvent;
 import org.havi.ui.event.HFocusListener;
 
@@ -119,30 +115,6 @@ public class HIcon extends HStaticIcon implements HNavigable {
     }
 
     // --- Focus event handling ---
-
-    /**
-     * Overridden from HVisible - HNavigable components are focus traversable.
-     */
-    public boolean isFocusTraversable() {
-        return true;
-    }
-
-    /**
-     * Override to return only user-registered listeners (excluding internal dummy).
-     */
-    public synchronized FocusListener[] getFocusListeners() {
-        return helper.getFocusListeners();
-    }
-
-    /**
-     * Override AWT focus processing to create HFocusEvent and delegate to processHFocusEvent.
-     * This is the bridge between AWT focus events and HAVI focus events.
-     */
-    protected void processFocusEvent(FocusEvent e) {
-        // Don't call super - we handle focus state ourselves via processHFocusEvent
-        HFocusEvent hEvent = new HFocusEvent(this, e.getID());
-        processHFocusEvent(hEvent);
-    }
 
     /**
      * Process HAVI focus events. Updates interaction state and notifies listeners.

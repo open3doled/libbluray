@@ -21,7 +21,10 @@
 package org.havi.ui;
 
 import java.awt.Component;
+import java.awt.event.FocusEvent;
+
 import org.dvb.ui.TestOpacity;
+import org.havi.ui.event.HFocusEvent;
 
 import java.awt.BDToolkit;
 
@@ -61,6 +64,18 @@ public abstract class HComponent extends Component implements HMatteLayer, TestO
 
     public boolean isEnabled() {
         return super.isEnabled();
+    }
+
+    /**
+     * Override AWT focus processing to create HFocusEvent and delegate to processHFocusEvent
+     * for all HNavigationInputPreferred implementations.
+     */
+    protected void processFocusEvent(FocusEvent e) {
+        if (this instanceof HNavigationInputPreferred) {
+            HFocusEvent hEvent = new HFocusEvent(this, e.getID());
+            ((HNavigationInputPreferred) this).processHFocusEvent(hEvent);
+        }
+        super.processFocusEvent(e);
     }
 
     private HMatte matte = null;

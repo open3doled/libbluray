@@ -23,7 +23,6 @@ package org.havi.ui;
 
 import java.awt.Component;
 import java.awt.event.FocusEvent;
-import java.awt.event.FocusListener;
 import java.awt.event.KeyEvent;
 import java.util.Hashtable;
 
@@ -36,36 +35,15 @@ import org.havi.ui.event.HFocusListener;
  */
 public final class HNavigableHelper {
 
-    private Hashtable navTargets;
+    private Hashtable navTargets = new Hashtable();
     private HSound gainFocusSound;
     private HSound loseFocusSound;
     transient HFocusListener hFocusListener;
 
     private HVisible hVisible;
 
-    /**
-     * Singleton FocusListener to ensure AWT focus events are delivered.
-     * AWT requires at least one FocusListener to be registered for focus events
-     * to be delivered to a component.
-     */
-    private static final FocusListener FOCUS_LISTENER_DUMMY = new FocusListener() {
-        public void focusGained(FocusEvent e) {
-            // Triggers AWT focus mechanism - actual handling done in processHFocusEvent
-        }
-        public void focusLost(FocusEvent e) {
-            // Triggers AWT focus mechanism - actual handling done in processHFocusEvent
-        }
-    };
-
     public HNavigableHelper(HVisible hVisible) {
         this.hVisible = hVisible;
-
-        /*
-         * Since the Component will not get focus unless there is
-         * a FocusListener registered we "secretly" add one.
-         * This ensures the AWT focus mechanism triggers focus events.
-         */
-        hVisible.addFocusListener(FOCUS_LISTENER_DUMMY);
     }
 
     /**
@@ -74,15 +52,8 @@ public final class HNavigableHelper {
      * @param target The HNavigable to transfer focus to, or null to remove
      */
     public void setMove(int keyCode, HNavigable target) {
-        if (navTargets == null) {
-            navTargets = new Hashtable();
-        }
         Integer code = Integer.valueOf(keyCode);
-        // Remove existing target if present
-        if (navTargets.containsKey(code)) {
-            navTargets.remove(code);
-        }
-        // Add new target (only if non-null)
+        navTargets.remove(code);
         if (target != null) {
             navTargets.put(code, target);
         }
@@ -94,9 +65,6 @@ public final class HNavigableHelper {
      * @return The HNavigable target, or null if not set
      */
     public HNavigable getMove(int keyCode) {
-        if (navTargets == null) {
-            return null;
-        }
         return (HNavigable) navTargets.get(Integer.valueOf(keyCode));
     }
 
@@ -137,9 +105,6 @@ public final class HNavigableHelper {
      * Adds an HFocusListener to receive focus events.
      */
     public synchronized void addHFocusListener(HFocusListener listener) {
-        if (listener == null) {
-            return;
-        }
         hFocusListener = HEventMulticaster.add(hFocusListener, listener);
     }
 
@@ -147,9 +112,6 @@ public final class HNavigableHelper {
      * Removes an HFocusListener.
      */
     public synchronized void removeHFocusListener(HFocusListener listener) {
-        if (listener == null) {
-            return;
-        }
         hFocusListener = HEventMulticaster.remove(hFocusListener, listener);
     }
 
@@ -157,7 +119,7 @@ public final class HNavigableHelper {
      * Returns an array of key codes for which navigation targets are set.
      */
     public int[] getNavigationKeys() {
-        if (navTargets == null || navTargets.size() == 0) {
+        if (navTargets.size() == 0) {
             return null;
         }
         int[] keyCodes = new int[navTargets.size()];
@@ -222,20 +184,8 @@ public final class HNavigableHelper {
     }
 
     /**
-     * Returns FocusListeners excluding the internal dummy listener.
-     * This allows the component to report only user-registered listeners.
-     */
-    public synchronized FocusListener[] getFocusListeners() {
-        // Temporarily remove our dummy, get the list, then re-add
-        hVisible.removeFocusListener(FOCUS_LISTENER_DUMMY);
-        FocusListener[] listeners = (FocusListener[]) hVisible.getListeners(FocusListener.class);
-        hVisible.addFocusListener(FOCUS_LISTENER_DUMMY);
-        return listeners;
-    }
-
-    /**
      * Processes a KeyEvent for navigation.
-     * Handles arrow keys by looking up navigation targets and transferring focus.
+     * Looks up navigation targets and transfers focus.
      *
      * @param e The KeyEvent to process
      * @return true if the event was handled, false otherwise
@@ -246,20 +196,11 @@ public final class HNavigableHelper {
             return false;
         }
 
-        int keyCode = e.getKeyCode();
-
-        // Only handle arrow keys
-        if (keyCode != KeyEvent.VK_UP && keyCode != KeyEvent.VK_DOWN &&
-            keyCode != KeyEvent.VK_LEFT && keyCode != KeyEvent.VK_RIGHT) {
-            return false;
-        }
-
-        // Look up navigation target
-        HNavigable target = getMove(keyCode);
+        // Look up navigation target for this key
+        HNavigable target = getMove(e.getKeyCode());
 
         if (target != null && target instanceof Component) {
-            Component targetComponent = (Component) target;
-            targetComponent.requestFocus();
+            ((Component) target).requestFocus();
             return true;
         }
 

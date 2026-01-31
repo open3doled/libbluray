@@ -23,8 +23,6 @@ package org.havi.ui;
 
 import java.awt.Color;
 import java.awt.Font;
-import java.awt.event.FocusEvent;
-import java.awt.event.FocusListener;
 import java.awt.event.KeyEvent;
 
 import org.havi.ui.event.HFocusEvent;
@@ -113,10 +111,6 @@ public class HText extends HStaticText implements HNavigable {
         return helper.getMove(keyCode);
     }
 
-    public boolean isFocusTraversable() {
-        return true;
-    }
-
     public void setFocusTraversal(HNavigable up, HNavigable down,
             HNavigable left, HNavigable right) {
         helper.setFocusTraversal(up, down, left, right);
@@ -155,21 +149,6 @@ public class HText extends HStaticText implements HNavigable {
     }
 
     // --- Focus event handling ---
-
-    /**
-     * Override to return only user-registered listeners (excluding internal dummy).
-     */
-    public synchronized FocusListener[] getFocusListeners() {
-        return helper.getFocusListeners();
-    }
-
-    /**
-     * Override AWT focus processing to create HFocusEvent and delegate to processHFocusEvent.
-     */
-    protected void processFocusEvent(FocusEvent e) {
-        HFocusEvent hEvent = new HFocusEvent(this, e.getID());
-        processHFocusEvent(hEvent);
-    }
 
     public void processHFocusEvent(HFocusEvent evt) {
         int state = getInteractionState();
