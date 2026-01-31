@@ -193,40 +193,17 @@ public class HGraphicLook implements HExtendedLook {
     }
 
     /**
-     * Checks if scaling is supported and requested for this HVisible.
-     * Per spec, HGraphicLook may support scalable content; RESIZE_NONE is minimum requirement.
-     */
-    private boolean isScalingRequested(HVisible visible) {
-        int resizeMode = visible.getResizeMode();
-        return resizeMode == HVisible.RESIZE_PRESERVE_ASPECT ||
-               resizeMode == HVisible.RESIZE_ARBITRARY;
-    }
-
-    /**
-     * Checks if the HVisible has any graphic content set across all states.
-     */
-    private boolean hasContent(HVisible visible) {
-        for (int state = HState.FIRST_STATE; state <= HState.LAST_STATE; state++) {
-            Image img = visible.getGraphicContent(state);
-            if (img != null) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    /**
-     * Gets the content size across all states.
-     * When scaling, returns narrowest width and shortest height.
-     * When not scaling, returns widest width and tallest height (to fit all content).
+     * Gets the maximum content size across all states.
+     * Returns the widest width and tallest height to fit all content without scaling.
+     *
+     * Note: This implementation only supports RESIZE_NONE (no scaling).
      *
      * @param visible The HVisible to examine
-     * @param forScaling If true, return minimum dimensions; if false, return maximum dimensions
      * @return Content dimensions, or null if no content with valid dimensions
      */
-    private Dimension getContentSize(HVisible visible, boolean forScaling) {
-        int resultWidth = forScaling ? Integer.MAX_VALUE : 0;
-        int resultHeight = forScaling ? Integer.MAX_VALUE : 0;
+    private Dimension getContentSize(HVisible visible) {
+        int maxWidth = 0;
+        int maxHeight = 0;
         boolean foundContent = false;
 
         for (int state = HState.FIRST_STATE; state <= HState.LAST_STATE; state++) {
@@ -236,15 +213,8 @@ public class HGraphicLook implements HExtendedLook {
                 int h = img.getHeight(visible);
                 if (w > 0 && h > 0) {
                     foundContent = true;
-                    if (forScaling) {
-                        // For scaling: find narrowest and shortest
-                        if (w < resultWidth) resultWidth = w;
-                        if (h < resultHeight) resultHeight = h;
-                    } else {
-                        // For no scaling: find widest and tallest
-                        if (w > resultWidth) resultWidth = w;
-                        if (h > resultHeight) resultHeight = h;
-                    }
+                    if (w > maxWidth) maxWidth = w;
+                    if (h > maxHeight) maxHeight = h;
                 }
             }
         }
@@ -252,7 +222,7 @@ public class HGraphicLook implements HExtendedLook {
         if (!foundContent) {
             return null;
         }
-        return new Dimension(resultWidth, resultHeight);
+        return new Dimension(maxWidth, maxHeight);
     }
 
     public Dimension getMinimumSize(HVisible visible) {
@@ -261,20 +231,10 @@ public class HGraphicLook implements HExtendedLook {
         int insetsHeight = insets.top + insets.bottom;
 
         // Step 1: HTextLook-specific - skip for HGraphicLook
+        // Step 2: Scaling - skip (this implementation only supports RESIZE_NONE)
 
-        // Step 2: If scaling supported AND requested AND content set
-        // Return narrowest width + shortest height
-        if (isScalingRequested(visible)) {
-            Dimension contentSize = getContentSize(visible, true); // forScaling = true
-            if (contentSize != null) {
-                return new Dimension(contentSize.width + insetsWidth,
-                                   contentSize.height + insetsHeight);
-            }
-        }
-
-        // Step 3: If no scaling or no scaling requested AND content set
-        // Return size large enough for all content
-        Dimension contentSize = getContentSize(visible, false); // forScaling = false
+        // Step 3: No scaling, content set - return size large enough for all content
+        Dimension contentSize = getContentSize(visible);
         if (contentSize != null) {
             return new Dimension(contentSize.width + insetsWidth,
                                contentSize.height + insetsHeight);
@@ -314,7 +274,7 @@ public class HGraphicLook implements HExtendedLook {
 
             // Handle NO_DEFAULT_WIDTH or NO_DEFAULT_HEIGHT cases
             if (hasDefaultWidth || hasDefaultHeight) {
-                Dimension contentSize = getContentSize(visible, false);
+                Dimension contentSize = getContentSize(visible);
                 if (contentSize != null) {
                     if (!hasDefaultWidth) {
                         w = contentSize.width;
@@ -338,19 +298,12 @@ public class HGraphicLook implements HExtendedLook {
 
         // Step 2: HTextLook-specific - skip for HGraphicLook
 
-        // Step 3: If no scaling or no scaling requested AND content present
-        // Return size large enough for content
-        if (!isScalingRequested(visible)) {
-            Dimension contentSize = getContentSize(visible, false);
-            if (contentSize != null) {
-                return new Dimension(contentSize.width + insetsWidth,
-                                   contentSize.height + insetsHeight);
-            }
-        }
-
-        // Step 4: If scaling supported AND content set, return current size
-        if (isScalingRequested(visible) && hasContent(visible)) {
-            return visible.getSize();
+        // Step 3: No scaling, content present - return size large enough for content
+        // (Step 4 scaling case skipped - this implementation only supports RESIZE_NONE)
+        Dimension contentSize = getContentSize(visible);
+        if (contentSize != null) {
+            return new Dimension(contentSize.width + insetsWidth,
+                               contentSize.height + insetsHeight);
         }
 
         // Step 5: No content and no default size - return current size
@@ -363,15 +316,10 @@ public class HGraphicLook implements HExtendedLook {
         int insetsHeight = insets.top + insets.bottom;
 
         // Step 1: HTextLook-specific - skip for HGraphicLook
+        // Step 2: Scaling - skip (this implementation only supports RESIZE_NONE)
 
-        // Step 2: If scaling supported, return current size
-        if (isScalingRequested(visible)) {
-            return visible.getSize();
-        }
-
-        // Step 3: If no scaling support AND content set
-        // Return size large enough for content
-        Dimension contentSize = getContentSize(visible, false);
+        // Step 3: No scaling, content set - return size large enough for content
+        Dimension contentSize = getContentSize(visible);
         if (contentSize != null) {
             return new Dimension(contentSize.width + insetsWidth,
                                contentSize.height + insetsHeight);
