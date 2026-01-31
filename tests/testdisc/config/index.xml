@@ -14,6 +14,7 @@
     - Title 6: Resize Test (00006)
     - Title 7: Color Test (00007)
     - Title 8: Graphic States Test (00008)
+    - Title 9: Graphic Alignment Test (00009)
   
   Note: Menu is accessed via firstPlayback/topMenu, not as a numbered title.
   Titles are 1-indexed in BD-J.
@@ -96,6 +97,14 @@
                 <titleAccessType>V_01</titleAccessType>
                 <bdjObject>
                     <bdjoFileName>00008</bdjoFileName>
+                </bdjObject>
+            </title>
+            
+            <!-- Title 9: Graphic Alignment Test -->
+            <title>
+                <titleAccessType>V_01</titleAccessType>
+                <bdjObject>
+                    <bdjoFileName>00009</bdjoFileName>
                 </bdjObject>
             </title>
         </titles>

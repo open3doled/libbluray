@@ -50,16 +50,18 @@ public class MenuXlet implements Xlet, HActionListener {
     private HStaticText titleLabel;
     private HTextButton[][] menuGrid;  // 2D grid for navigation
     
-    // Menu configuration: 4 rows x 2 columns
-    // Grid layout:  [Alignment]    [Background/Border]
-    //               [States]       [Font]
-    //               [Multiline]    [Resize]
-    //               [Color]        [Graphic States]
+    // Menu configuration: 5 rows x 2 columns
+    // Grid layout:  [Alignment]       [Background/Border]
+    //               [States (Text)]   [Font]
+    //               [Multiline]       [Resize]
+    //               [Color]           [States (Graphic)]
+    //               [Graphic Align]   [empty]
     private static final String[][] MENU_LABELS = {
         { "Alignment", "Background/Border" },
         { "States (Text)", "Font" },
         { "Multiline", "Resize" },
-        { "Color", "States (Graphic)" }
+        { "Color", "States (Graphic)" },
+        { "Graphic Align", null }
     };
     
     // Title numbers corresponding to each menu item (row-major order)
@@ -67,17 +69,18 @@ public class MenuXlet implements Xlet, HActionListener {
         { 1, 2 },
         { 3, 4 },
         { 5, 6 },
-        { 7, 8 }
+        { 7, 8 },
+        { 9, -1 }
     };
     
     // Layout constants
     private static final int BUTTON_WIDTH = 280;
-    private static final int BUTTON_HEIGHT = 55;
+    private static final int BUTTON_HEIGHT = 50;
     private static final int BUTTON_GAP_H = 40;
-    private static final int BUTTON_GAP_V = 20;
-    private static final int MARGIN = 50;
+    private static final int BUTTON_GAP_V = 15;
+    private static final int MARGIN = 40;
     
-    private static final int ROWS = 4;
+    private static final int ROWS = 5;
     private static final int COLS = 2;
 
     public void initXlet(XletContext context) throws XletStateChangeException {
