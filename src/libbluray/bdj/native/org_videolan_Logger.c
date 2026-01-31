@@ -62,7 +62,7 @@ Java_org_videolan_Logger_logN(JNIEnv *env, jclass cls, jboolean error, jstring j
         mask |= DBG_CRIT;
     }
 
-    bd_debug(file ? file : "JVM", line, mask, "%s\n", msg);
+    bdpriv_debug(file ? file : "JVM", line, mask, "%s\n", msg);
 
     if (file) {
         (*env)->ReleaseStringUTFChars(env, jfile, file);

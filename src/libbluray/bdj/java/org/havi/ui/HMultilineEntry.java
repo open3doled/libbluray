@@ -22,6 +22,8 @@ package org.havi.ui;
 import java.awt.Color;
 import java.awt.Font;
 
+import org.videolan.BDJXletContext;
+
 public class HMultilineEntry extends HSinglelineEntry {
     public HMultilineEntry() {
         org.videolan.Logger.unimplemented(HMultilineEntry.class.getName(), "");
@@ -45,13 +47,11 @@ public class HMultilineEntry extends HSinglelineEntry {
     }
 
     public static void setDefaultLook(HMultilineEntryLook look) {
-        DefaultLook = look;
+        BDJXletContext.setXletDefaultLook(PROPERTY_LOOK, look);
     }
 
     public static HSinglelineEntryLook getDefaultLook() {
-        if (DefaultLook == null)
-            org.videolan.Logger.unimplemented("", "getDefaultLook");
-        return DefaultLook;
+        return (HSinglelineEntryLook) BDJXletContext.getXletDefaultLook(PROPERTY_LOOK, DEFAULT_LOOK);
     }
 
     public void setLook(HLook hlook) throws HInvalidLookException {
@@ -66,7 +66,8 @@ public class HMultilineEntry extends HSinglelineEntry {
         org.videolan.Logger.unimplemented(HMultilineEntry.class.getName(), "");
     }
 
-    private static HSinglelineEntryLook DefaultLook = null;
+    private static final Class DEFAULT_LOOK = HSinglelineEntryLook.class;
+    private static final String PROPERTY_LOOK = HMultilineEntry.class.getName();
 
     private static final long serialVersionUID = 2690386579157062435L;
 }

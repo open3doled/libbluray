@@ -22,6 +22,8 @@ package org.havi.ui;
 import org.havi.ui.event.HFocusEvent;
 import org.havi.ui.event.HFocusListener;
 
+import org.videolan.BDJXletContext;
+
 public class HRange extends HStaticRange implements HNavigable {
     public HRange() {
         org.videolan.Logger.unimplemented(HRange.class.getName(), "");
@@ -37,13 +39,11 @@ public class HRange extends HStaticRange implements HNavigable {
     }
 
     public static void setDefaultLook(HRangeLook look) {
-        DefaultLook = look;
+        BDJXletContext.setXletDefaultLook(PROPERTY_LOOK, look);
     }
 
     public static HRangeLook getDefaultLook() {
-        if (DefaultLook == null)
-            org.videolan.Logger.unimplemented("", "getDefaultLook");
-        return DefaultLook;
+        return (HRangeLook) BDJXletContext.getXletDefaultLook(PROPERTY_LOOK, DEFAULT_LOOK);
     }
 
     public void setMove(int keyCode, HNavigable target) {
@@ -100,7 +100,8 @@ public class HRange extends HStaticRange implements HNavigable {
         org.videolan.Logger.unimplemented(HRange.class.getName(), "");
     }
 
-    private static HRangeLook DefaultLook = null;
+    private static final Class DEFAULT_LOOK = HRangeLook.class;
+    private static final String PROPERTY_LOOK = HRange.class.getName();
 
     private static final long serialVersionUID = 2739614186691834675L;
 }

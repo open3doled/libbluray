@@ -2,6 +2,7 @@
  * This file is part of libbluray
  * Copyright (C) 2010  William Hahne
  * Copyright (C) 2013  Petri Hintukainen <phintuka@users.sourceforge.net>
+ * Copyright (C) 2026  libbluray project
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -21,13 +22,14 @@
 package org.havi.ui;
 
 import java.awt.Color;
-import java.awt.Graphics;
 import java.awt.Dimension;
+import java.awt.Graphics;
 import java.awt.Insets;
 
-import org.videolan.Logger;
-
 public class HTextLook implements HExtendedLook {
+
+    private static final Insets DEFAULT_INSETS = new Insets(2, 2, 2, 2);
+    private static final Insets NO_INSETS = new Insets(0, 0, 0, 0);
 
     public HTextLook() {
     }
@@ -35,33 +37,64 @@ public class HTextLook implements HExtendedLook {
     public void fillBackground(Graphics g, HVisible visible, int state) {
         if (visible.getBackgroundMode() == HVisible.BACKGROUND_FILL) {
             Color color = visible.getBackground();
-            Dimension dimension = visible.getSize();
-            g.setColor(color);
-            g.fillRect(0, 0, dimension.width, dimension.height);
+            if (color != null) {
+                Dimension dimension = visible.getSize();
+                g.setColor(color);
+                g.fillRect(0, 0, dimension.width, dimension.height);
+            }
         }
     }
 
     public void renderBorders(Graphics g, HVisible visible, int state) {
-        Insets insets = getInsets(visible);
+        if (!visible.getBordersEnabled()) {
+            return;
+        }
+
+        // Only draw borders when focused
+        if ((state & HState.FOCUSED_STATE_BIT) == 0) {
+            return;
+        }
+
+        Insets insets = DEFAULT_INSETS;
         Color fg = visible.getForeground();
         Dimension dimension = visible.getSize();
 
         if (fg != null) {
             g.setColor(fg);
+            // Top border
             g.fillRect(0, 0, dimension.width, insets.top);
+            // Right border
             g.fillRect(dimension.width - insets.right, 0, insets.right, dimension.height);
+            // Bottom border
             g.fillRect(0, dimension.height - insets.bottom, dimension.width, insets.bottom);
+            // Left border
             g.fillRect(0, 0, insets.left, dimension.height);
         }
     }
 
     public void renderVisible(Graphics g, HVisible visible, int state) {
-        String text = visible.getTextContent(state);
-        //Insets insets = getInsets(visible);
-        if (text == null) {
+        HTextLayoutManager tlm = visible.getTextLayoutManager();
+        if (tlm == null) {
             return;
         }
-        logger.unimplemented("renderVisible[text=" + text + "]");
+
+        String text = visible.getTextContent(state);
+        if (text == null || text.length() == 0) {
+            return;
+        }
+
+        Dimension size = visible.getSize();
+        Insets insets = getInsets(visible);
+
+        // Calculate available area for text
+        int availWidth = size.width - insets.left - insets.right;
+        int availHeight = size.height - insets.top - insets.bottom;
+
+        if (availWidth <= 0 || availHeight <= 0) {
+            return;
+        }
+
+        tlm.render(text, g, visible, insets);
     }
 
     public void showLook(Graphics g, HVisible visible, int state) {
@@ -71,26 +104,139 @@ public class HTextLook implements HExtendedLook {
     }
 
     public void widgetChanged(HVisible visible, HChangeData[] changes) {
-        visible.repaint();
+        if (visible.isVisible()) {
+            visible.repaint();
+        }
     }
 
-    public Dimension getMinimumSize(HVisible hvisible) {
-        logger.unimplemented("getMinimumSize");
-        return null;
+    private Dimension clampShortDimension(int width, int height) {
+        int w = Math.max(0, Math.min(width, Short.MAX_VALUE));
+        int h = Math.max(0, Math.min(height, Short.MAX_VALUE));
+
+        return new Dimension(w, h);
     }
 
-    public Dimension getPreferredSize(HVisible hvisible) {
-        logger.unimplemented("getPreferredSize");
-        return null;
+    public Dimension getMinimumSize(HVisible visible) {
+        Insets insets = getInsets(visible);
+        int insetsWidth = (insets != null) ? insets.left + insets.right : 0;
+        int insetsHeight = (insets != null) ? insets.top + insets.bottom : 0;
+
+        // Step 1: If HDefaultTextLayoutManager, delegate to its getMinimumSize()
+        HTextLayoutManager tlm = visible.getTextLayoutManager();
+        if (tlm instanceof HDefaultTextLayoutManager) {
+            Dimension size = ((HDefaultTextLayoutManager) tlm).getMinimumSize(visible);
+            if (size != null && (size.width > 0 || size.height > 0)) {
+                return clampShortDimension(size.width + insetsWidth, size.height + insetsHeight);
+            }
+        }
+        // If not HDefaultTextLayoutManager or returns zero, proceed
+
+        // Steps 2-3: HTextLook does not support scaling, content sizing handled by TLM
+
+        // Step 4: If no content but default size set
+        Dimension defaultSize = visible.getDefaultSize();
+        if (defaultSize != null &&
+            defaultSize.width != HVisible.NO_DEFAULT_WIDTH &&
+            defaultSize.height != HVisible.NO_DEFAULT_HEIGHT) {
+            return clampShortDimension(defaultSize.width + insetsWidth, defaultSize.height + insetsHeight);
+        }
+
+        // Step 5: Implementation-specific minimum (0,0)
+        return new Dimension(insetsWidth, insetsHeight);
     }
 
-    public Dimension getMaximumSize(HVisible hvisible) {
-        logger.unimplemented("getMAximumSize");
-        return null;
+    public Dimension getPreferredSize(HVisible visible) {
+        Insets insets = getInsets(visible);
+        int insetsWidth = (insets != null) ? insets.left + insets.right : 0;
+        int insetsHeight = (insets != null) ? insets.top + insets.bottom : 0;
+
+        Dimension defaultSize = visible.getDefaultSize();
+
+        // Step 1: Check if default size is set (must check BEFORE delegating to TLM)
+        if (defaultSize != null) {
+            int w = defaultSize.width;
+            int h = defaultSize.height;
+
+            boolean hasDefaultWidth = (w != HVisible.NO_DEFAULT_WIDTH);
+            boolean hasDefaultHeight = (h != HVisible.NO_DEFAULT_HEIGHT);
+
+            if (hasDefaultWidth && hasDefaultHeight) {
+                // Full default size is set
+                return clampShortDimension(w + insetsWidth, h + insetsHeight);
+            }
+
+            // Handle NO_DEFAULT_WIDTH or NO_DEFAULT_HEIGHT cases
+            if (hasDefaultWidth || hasDefaultHeight) {
+                Dimension contentSize = getContentPreferredSize(visible);
+                if (!hasDefaultWidth) {
+                    w = contentSize.width;
+                }
+                if (!hasDefaultHeight) {
+                    h = contentSize.height;
+                }
+                return clampShortDimension(w + insetsWidth, h + insetsHeight);
+            }
+        }
+
+        // Step 2: If HDefaultTextLayoutManager, delegate to its getPreferredSize()
+        HTextLayoutManager tlm = visible.getTextLayoutManager();
+        if (tlm instanceof HDefaultTextLayoutManager) {
+            Dimension size = ((HDefaultTextLayoutManager) tlm).getPreferredSize(visible);
+            if (size != null && (size.width > 0 || size.height > 0)) {
+                return clampShortDimension(size.width + insetsWidth, size.height + insetsHeight);
+            }
+        }
+        // If not HDefaultTextLayoutManager or returns zero, proceed
+
+        // Steps 3-4: HTextLook does not support scaling
+
+        // Step 5: Return current size of HVisible
+        return visible.getSize();
+    }
+
+    /**
+     * Helper method to get preferred content size from the text layout manager.
+     */
+    private Dimension getContentPreferredSize(HVisible visible) {
+        HTextLayoutManager tlm = visible.getTextLayoutManager();
+        if (tlm instanceof HDefaultTextLayoutManager) {
+            Dimension size = ((HDefaultTextLayoutManager) tlm).getPreferredSize(visible);
+            if (size != null && (size.width > 0 || size.height > 0)) {
+                return size;
+            }
+        }
+        // Fallback: use current size (without insets, as caller adds them)
+        Dimension currentSize = visible.getSize();
+        Insets insets = getInsets(visible);
+        int w = currentSize.width - (insets != null ? insets.left + insets.right : 0);
+        int h = currentSize.height - (insets != null ? insets.top + insets.bottom : 0);
+        return new Dimension(Math.max(0, w), Math.max(0, h));
+    }
+
+    public Dimension getMaximumSize(HVisible visible) {
+        Insets insets = getInsets(visible);
+        int insetsWidth = (insets != null) ? insets.left + insets.right : 0;
+        int insetsHeight = (insets != null) ? insets.top + insets.bottom : 0;
+
+        // Step 1: If HDefaultTextLayoutManager, delegate to its getMaximumSize()
+        HTextLayoutManager tlm = visible.getTextLayoutManager();
+        if (tlm instanceof HDefaultTextLayoutManager) {
+            Dimension size = ((HDefaultTextLayoutManager) tlm).getMaximumSize(visible);
+            if (size != null && (size.width > 0 || size.height > 0)) {
+                return clampShortDimension(size.width + insetsWidth, size.height + insetsHeight);
+            }
+        }
+        // If not HDefaultTextLayoutManager or returns zero, proceed
+
+        // Steps 2-3: HTextLook does not support scaling
+
+        // Step 4: No content, return Short.MAX_VALUE
+        return new Dimension(Short.MAX_VALUE, Short.MAX_VALUE);
     }
 
     public boolean isOpaque(HVisible visible) {
-        if (visible.getBackgroundMode() != 1) {
+        // Component is opaque if background fill is enabled and has opaque background color
+        if (visible.getBackgroundMode() != HVisible.BACKGROUND_FILL) {
             return false;
         }
 
@@ -104,10 +250,8 @@ public class HTextLook implements HExtendedLook {
 
     public Insets getInsets(HVisible visible) {
         if (!visible.getBordersEnabled()) {
-            return new Insets(0, 0, 0, 0);
+            return NO_INSETS;
         }
-        return new Insets(2, 2, 2, 2);
+        return DEFAULT_INSETS;
     }
-
-    private static final Logger logger = Logger.getLogger(HTextLook.class.getName());
 }

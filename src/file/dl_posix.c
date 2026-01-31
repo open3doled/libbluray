@@ -137,7 +137,7 @@ const char *dl_get_path(void)
 
 #if defined(__APPLE__) || defined(HAVE_DLADDR)
         Dl_info dl_info;
-        int ret = dladdr((void *)dl_get_path, &dl_info);
+        int ret = dladdr((void *)(uintptr_t)dl_get_path, &dl_info);
         if (ret != 0) {
             lib_path = strdup(dl_info.dli_fname);
 

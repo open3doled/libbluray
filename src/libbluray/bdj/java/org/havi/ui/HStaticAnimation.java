@@ -21,6 +21,8 @@ package org.havi.ui;
 
 import java.awt.Image;
 
+import org.videolan.BDJXletContext;
+
 public class HStaticAnimation extends HVisible implements HNoInputPreferred,
         HAnimateEffect {
     public HStaticAnimation() {
@@ -42,13 +44,11 @@ public class HStaticAnimation extends HVisible implements HNoInputPreferred,
     }
 
     public static void setDefaultLook(HAnimateLook hlook) {
-        DefaultLook = hlook;
+        BDJXletContext.setXletDefaultLook(PROPERTY_LOOK, hlook);
     }
 
     public static HAnimateLook getDefaultLook() {
-        if (DefaultLook == null)
-            org.videolan.Logger.unimplemented("", "getDefaultLook");
-        return DefaultLook;
+        return (HAnimateLook) BDJXletContext.getXletDefaultLook(PROPERTY_LOOK, DEFAULT_LOOK);
     }
 
     public void start() {
@@ -100,7 +100,8 @@ public class HStaticAnimation extends HVisible implements HNoInputPreferred,
         return 0;
     }
 
-    private static HAnimateLook DefaultLook = null;
+    private static final Class DEFAULT_LOOK =  HAnimateLook.class;
+    private static final String PROPERTY_LOOK = HStaticAnimation.class.getName();
 
     private static final long serialVersionUID = -7320112528206101937L;
 }

@@ -30,11 +30,6 @@ option('bdj_jar',
     value: 'auto',
     description: 'Build the BD-J JAR file (requires Java)')
 
-option('java9',
-    type: 'boolean',
-    value: true,
-    description: 'Build with Java 9+ (drop support for Java >= 1.7.0)')
-
 option('jdk_home',
     type: 'string',
     value: '',

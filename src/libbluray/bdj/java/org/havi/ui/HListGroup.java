@@ -24,6 +24,8 @@ import org.havi.ui.event.HFocusEvent;
 import org.havi.ui.event.HFocusListener;
 import org.havi.ui.event.HItemEvent;
 
+import org.videolan.BDJXletContext;
+
 public class HListGroup extends HVisible implements HItemValue {
     public HListGroup() {
         org.videolan.Logger.unimplemented(HListGroup.class.getName(), "");
@@ -42,13 +44,11 @@ public class HListGroup extends HVisible implements HItemValue {
     }
 
     public static void setDefaultLook(HListGroupLook look) {
-        DefaultLook = look;
+        BDJXletContext.setXletDefaultLook(PROPERTY_LOOK, look);
     }
 
     public static HListGroupLook getDefaultLook() {
-        if (DefaultLook == null)
-            org.videolan.Logger.unimplemented("", "getDefaultLook");
-        return DefaultLook;
+        return (HListGroupLook) BDJXletContext.getXletDefaultLook(PROPERTY_LOOK, DEFAULT_LOOK);
     }
 
     public HListElement[] getListContent() {
@@ -271,7 +271,8 @@ public class HListGroup extends HVisible implements HItemValue {
     public static final int DEFAULT_ICON_WIDTH = -3;
     public static final int DEFAULT_ICON_HEIGHT = -4;
 
-    private static HListGroupLook DefaultLook = null;
+    private static final String PROPERTY_LOOK = HListGroup.class.getName();
+    static final Class DEFAULT_LOOK = HListGroupLook.class;
 
     private static final long serialVersionUID = 6012900970046475431L;
 }

@@ -49,7 +49,7 @@ uint32_t bd_get_debug_mask(void)
     return debug_mask;
 }
 
-void bd_debug(const char *file, int line, uint32_t mask, const char *format, ...)
+void bdpriv_debug(const char *file, int line, uint32_t mask, const char *format, ...)
 {
     static int   debug_init = 0, debug_file = 0;
     static FILE *logfile    = NULL;

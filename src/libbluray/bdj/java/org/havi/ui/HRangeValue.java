@@ -24,6 +24,8 @@ import org.havi.ui.event.HAdjustmentListener;
 import org.havi.ui.event.HFocusEvent;
 import org.havi.ui.event.HFocusListener;
 
+import org.videolan.BDJXletContext;
+
 public class HRangeValue extends HRange implements HAdjustmentValue {
     public HRangeValue() {
         org.videolan.Logger.unimplemented(HRangeValue.class.getName(), "");
@@ -39,13 +41,11 @@ public class HRangeValue extends HRange implements HAdjustmentValue {
     }
 
     public static void setDefaultLook(HRangeLook look) {
-        DefaultLook = look;
+        BDJXletContext.setXletDefaultLook(PROPERTY_LOOK, look);
     }
 
     public static HRangeLook getDefaultLook() {
-        if (DefaultLook == null)
-            org.videolan.Logger.unimplemented("", "getDefaultLook");
-        return DefaultLook;
+        return (HRangeLook) BDJXletContext.getXletDefaultLook(PROPERTY_LOOK, DEFAULT_LOOK);
     }
 
     public void setMove(int keyCode, HNavigable target) {
@@ -150,7 +150,8 @@ public class HRangeValue extends HRange implements HAdjustmentValue {
         org.videolan.Logger.unimplemented(HRangeValue.class.getName(), "");
     }
 
-    private static HRangeLook DefaultLook = null;
+    private static final Class DEFAULT_LOOK =  HRangeLook.class;
+    private static final String PROPERTY_LOOK = HRangeValue.class.getName();
 
     private static final long serialVersionUID = -7809155734787063596L;
 }

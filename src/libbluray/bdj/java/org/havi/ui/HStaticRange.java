@@ -22,6 +22,8 @@ package org.havi.ui;
 
 import org.videolan.Logger;
 
+import org.videolan.BDJXletContext;
+
 public class HStaticRange extends HVisible implements HNoInputPreferred,
         HOrientable {
 
@@ -57,13 +59,11 @@ public class HStaticRange extends HVisible implements HNoInputPreferred,
     }
 
     public static void setDefaultLook(HRangeLook look) {
-        DefaultLook = look;
+        BDJXletContext.setXletDefaultLook(PROPERTY_LOOK, look);
     }
 
     public static HRangeLook getDefaultLook() {
-        if (DefaultLook == null)
-            Logger.unimplemented("", "getDefaultLook");
-        return DefaultLook;
+        return (HRangeLook) BDJXletContext.getXletDefaultLook(PROPERTY_LOOK, DEFAULT_LOOK);
     }
 
     public int getOrientation() {
@@ -128,7 +128,8 @@ public class HStaticRange extends HVisible implements HNoInputPreferred,
     public final static int SLIDER_BEHAVIOR = 0;
     public final static int SCROLLBAR_BEHAVIOR = 1;
 
-    private static HRangeLook DefaultLook = null;
+    static final Class DEFAULT_LOOK = HRangeLook.class;
+    private static final String PROPERTY_LOOK = HStaticRange.class.getName();
 
     private static final long serialVersionUID = 3871722305722412744L;
 

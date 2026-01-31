@@ -23,6 +23,7 @@ import java.awt.Image;
 import org.havi.ui.event.HFocusEvent;
 import org.havi.ui.event.HFocusListener;
 
+import org.videolan.BDJXletContext;
 import org.videolan.Logger;
 
 public class HAnimation extends HStaticAnimation implements HNavigable {
@@ -53,13 +54,11 @@ public class HAnimation extends HStaticAnimation implements HNavigable {
     }
 
     public static void setDefaultLook(HAnimateLook hlook) {
-        DefaultLook = hlook;
+        BDJXletContext.setXletDefaultLook(PROPERTY_LOOK, hlook);
     }
 
     public static HAnimateLook getDefaultLook() {
-        if (DefaultLook == null)
-            logger.unimplemented("getDefaultLook");
-        return DefaultLook;
+        return (HAnimateLook) BDJXletContext.getXletDefaultLook(PROPERTY_LOOK, DEFAULT_LOOK);
     }
 
     public void setMove(int keyCode, HNavigable target) {
@@ -116,7 +115,8 @@ public class HAnimation extends HStaticAnimation implements HNavigable {
         logger.unimplemented("");
     }
 
-    private static HAnimateLook DefaultLook = null;
+    private static final Class DEFAULT_LOOK =  HAnimateLook.class;
+    private static final String PROPERTY_LOOK = HAnimation.class.getName();
 
     private static final Logger logger = Logger.getLogger(HAnimation.class.getName());
 

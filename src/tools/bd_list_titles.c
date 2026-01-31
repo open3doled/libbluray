@@ -117,7 +117,7 @@ int main(int argc, char *argv[])
         ti = bd_get_title_info(bd, ii, 0);
         printf(
        "index: %3d duration: %02" PRIu64 ":%02" PRIu64 ":%02" PRIu64 " chapters: %3d angles: %2u clips: %3u (playlist: %05d.mpls) "
-       "V:%d A:%-2d PG:%-2d IG:%-2d SV:%d SA:%d\n",
+       "V:%d A:%-2d PG:%-2d IG:%-2d SV:%d SA:%d DV:%d\n",
               ii + 1,
               (ti->duration / 90000) / (3600),
               ((ti->duration / 90000) % 3600) / 60,
@@ -128,7 +128,8 @@ int main(int argc, char *argv[])
               ti->clips[0].pg_stream_count,
               ti->clips[0].ig_stream_count,
               ti->clips[0].sec_video_stream_count,
-              ti->clips[0].sec_audio_stream_count
+              ti->clips[0].sec_audio_stream_count,
+              ti->clips[0].dv_stream_count
         );
         if (langs) {
             _dump_langs(&ti->clips[0]);

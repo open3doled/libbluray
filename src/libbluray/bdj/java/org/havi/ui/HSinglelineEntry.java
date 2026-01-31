@@ -28,6 +28,8 @@ import org.havi.ui.event.HKeyListener;
 import org.havi.ui.event.HTextEvent;
 import org.havi.ui.event.HTextListener;
 
+import org.videolan.BDJXletContext;
+
 public class HSinglelineEntry extends HVisible implements HTextValue {
     public HSinglelineEntry() {
         org.videolan.Logger.unimplemented(HSinglelineEntry.class.getName(), "");
@@ -93,13 +95,11 @@ public class HSinglelineEntry extends HVisible implements HTextValue {
     }
 
     public static void setDefaultLook(HSinglelineEntryLook look) {
-        DefaultLook = look;
+        BDJXletContext.setXletDefaultLook(PROPERTY_LOOK, look);
     }
 
     public static HSinglelineEntryLook getDefaultLook() {
-        if (DefaultLook == null)
-            org.videolan.Logger.unimplemented("", "getDefaultLook");
-        return DefaultLook;
+        return (HSinglelineEntryLook) BDJXletContext.getXletDefaultLook(PROPERTY_LOOK, DEFAULT_LOOK);
     }
 
     public void setLook(HLook hlook) throws HInvalidLookException {
@@ -239,7 +239,8 @@ public class HSinglelineEntry extends HVisible implements HTextValue {
 
     private int maxChars;
 
-    private static HSinglelineEntryLook DefaultLook = null;
+    private static final Class DEFAULT_LOOK = HSinglelineEntryLook.class;
+    private static final String PROPERTY_LOOK = HSinglelineEntry.class.getName();
 
     private static final long serialVersionUID = 7577783421311076636L;
 }

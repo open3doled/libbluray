@@ -20,13 +20,10 @@
 package org.videolan;
 
 public class TIMark {
-    public TIMark(int index, int type, long start, long duration, long offset, int clip) {
+    public TIMark(int index, int type, long start) {
         this.index = index;
         this.type = type;
         this.start = start;
-        this.duration = duration;
-        this.offset = offset;
-        this.clip = clip;
     }
 
     public int getIndex() {
@@ -41,22 +38,6 @@ public class TIMark {
         return start * 100000 / 9;
     }
 
-    public long getDuration() {
-        return duration;
-    }
-
-    public long getDurationNanoseconds() {
-        return duration * 100000 / 9;
-    }
-
-    public long getOffset() {
-        return offset;
-    }
-
-    public int getClipIndex() {
-        return clip;
-    }
-
     public int getType() {
         return type;
     }
@@ -64,9 +45,6 @@ public class TIMark {
     private final int index;
     private final int type;
     private final long start;
-    private final long duration;
-    private final long offset;
-    private final int clip;
 
     public static final int MARK_TYPE_ENTRY = 1;
     public static final int MARK_TYPE_LINK = 2;

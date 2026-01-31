@@ -31,9 +31,9 @@ struct bd_disc;
  * VFS
  */
 
-BD_PRIVATE struct bd_disc *bd_get_disc(struct bluray *bd);
+BD_PRIVATE struct bd_disc *bdpriv_get_disc(struct bluray *bd);
 
-BD_PRIVATE int      bd_set_virtual_package(struct bluray *bd, const char *vp_path, int psr_init_backup);
+BD_PRIVATE int      bdpriv_set_virtual_package(struct bluray *bd, const char *vp_path, int psr_init_backup);
 
 /*
  * UO mask, KIT
@@ -42,22 +42,22 @@ BD_PRIVATE int      bd_set_virtual_package(struct bluray *bd, const char *vp_pat
 #define BDJ_MENU_CALL_MASK     0x01
 #define BDJ_TITLE_SEARCH_MASK  0x02
 
-BD_PRIVATE uint64_t bd_get_uo_mask(struct bluray *bd);
-BD_PRIVATE void     bd_set_bdj_uo_mask(struct bluray *bd, unsigned mask);
-BD_PRIVATE void     bd_set_bdj_kit(struct bluray *bd, int mask);
+BD_PRIVATE uint64_t bdpriv_get_uo_mask(struct bluray *bd);
+BD_PRIVATE void     bdpriv_set_bdj_uo_mask(struct bluray *bd, unsigned mask);
+BD_PRIVATE void     bdpriv_set_bdj_kit(struct bluray *bd, int mask);
 
 /*
  * title selection
  */
 
-BD_PRIVATE int      bd_play_title_internal(struct bluray *bd, unsigned title);
+BD_PRIVATE int      bdpriv_play_title_internal(struct bluray *bd, unsigned title);
 
 /*
  * register access
  */
 
-BD_PRIVATE uint32_t bd_reg_read(struct bluray *bd, int psr, int reg);
-BD_PRIVATE int      bd_reg_write(struct bluray *bd, int psr, int reg, uint32_t value, uint32_t psr_value_mask);
+BD_PRIVATE uint32_t bdpriv_reg_read(struct bluray *bd, int psr, int reg);
+BD_PRIVATE int      bdpriv_reg_write(struct bluray *bd, int psr, int reg, uint32_t value, uint32_t psr_value_mask);
 
 /*
  * playback control
@@ -69,10 +69,10 @@ enum bd_select_rate_reason {
     BDJ_PLAYBACK_STOP  = 2,
 };
 
-BD_PRIVATE int      bd_play_playlist_at(struct bluray *bd, int playlist, int playitem, int playmark, int64_t time);
-BD_PRIVATE void     bd_select_rate(struct bluray *bd, float rate, int reason);
-BD_PRIVATE int      bd_bdj_seek(struct bluray *bd, int playitem, int playmark, int64_t time);
-BD_PRIVATE int      bd_bdj_sound_effect(struct bluray *bd, int id);
+BD_PRIVATE int      bdpriv_play_playlist_at(struct bluray *bd, int playlist, int playitem, int playmark, int64_t time);
+BD_PRIVATE void     bdpriv_select_rate(struct bluray *bd, float rate, int reason);
+BD_PRIVATE int      bdpriv_seek(struct bluray *bd, int playitem, int playmark, int64_t time);
+BD_PRIVATE int      bdpriv_sound_effect(struct bluray *bd, int id);
 
 /*
  * BD-J overlay
@@ -80,10 +80,10 @@ BD_PRIVATE int      bd_bdj_sound_effect(struct bluray *bd, int id);
 
 struct bd_argb_buffer_s;
 
-BD_PRIVATE struct bd_argb_buffer_s *bd_lock_osd_buffer(struct bluray *bd);
-BD_PRIVATE void                     bd_unlock_osd_buffer(struct bluray *bd);
+BD_PRIVATE struct bd_argb_buffer_s *bdpriv_lock_osd_buffer(struct bluray *bd);
+BD_PRIVATE void                     bdpriv_unlock_osd_buffer(struct bluray *bd);
 
-BD_PRIVATE void  bd_bdj_osd_cb(struct bluray *bd, const unsigned *img, int w, int h,
-                               int x0, int y0, int x1, int y1);
+BD_PRIVATE void  bdpriv_bdj_osd_cb(struct bluray *bd, const unsigned *img, int w, int h,
+                                   int x0, int y0, int x1, int y1);
 
 #endif  /* _BLURAY_INTERNAL_H_ */

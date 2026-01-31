@@ -27,7 +27,9 @@ import org.dvb.media.VideoFormatListener;
 import org.dvb.media.VideoTransformation;
 import org.havi.ui.HScreen;
 import org.havi.ui.HVideoConfiguration;
+
 import org.videolan.TIClip;
+import org.videolan.StreamInfo;
 
 public class VideoFormatControlImpl implements VideoFormatControl {
     protected VideoFormatControlImpl(Handler player) {
@@ -45,9 +47,9 @@ public class VideoFormatControlImpl implements VideoFormatControl {
 
         byte aspect = ci.getVideoStreams()[0].getVideoAspectRatioCode();
         switch (aspect) {
-            case (byte)0x02:
+            case StreamInfo.ASPECT_4_3:
                 return org.dvb.media.VideoFormatControl.ASPECT_RATIO_4_3;
-            case (byte)0x03:
+            case StreamInfo.ASPECT_16_9:
                 return org.dvb.media.VideoFormatControl.ASPECT_RATIO_16_9;
             default:
                 return org.dvb.media.VideoFormatControl.ASPECT_RATIO_UNKNOWN;

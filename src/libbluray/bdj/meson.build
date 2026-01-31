@@ -9,7 +9,7 @@ if ant.found() and add_languages('java', native: false, required: get_option('bd
     javac_version = meson.get_compiler('java').version()
     javac_path    = find_program('javac').full_path()
     javac_arg     = '-Xlint:-deprecation'
-    if get_option('java9') and bdj_type == 'j2se'
+    if bdj_type == 'j2se'
         if javac_version.version_compare('>= 18.0')
             java_src_version = '1.8'
             java_src_version_asm = '1.8'
