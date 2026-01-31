@@ -39,8 +39,12 @@ public class HTextLook implements HExtendedLook {
             Color color = visible.getBackground();
             if (color != null) {
                 Dimension dimension = visible.getSize();
+                Insets insets = getInsets(visible);
                 g.setColor(color);
-                g.fillRect(0, 0, dimension.width, dimension.height);
+                // Fill only the content area, not the border/inset area
+                g.fillRect(insets.left, insets.top,
+                    dimension.width - insets.left - insets.right,
+                    dimension.height - insets.top - insets.bottom);
             }
         }
     }
