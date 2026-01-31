@@ -25,16 +25,19 @@ import org.videolan.BDJXletContext;
 public class HStaticIcon extends HVisible implements HNoInputPreferred {
     public HStaticIcon() {
         super(getDefaultLook());
+        setBordersEnabled(false);
     }
 
     public HStaticIcon(Image imageNormal, int x, int y, int width, int height) {
         super(getDefaultLook(), x, y, width, height);
         setGraphicContent(imageNormal, NORMAL_STATE);
+        setBordersEnabled(false);
     }
 
     public HStaticIcon(Image imageNormal) {
         super(getDefaultLook());
         setGraphicContent(imageNormal, NORMAL_STATE);
+        setBordersEnabled(false);
     }
 
     public void setLook(HLook hlook) throws HInvalidLookException {

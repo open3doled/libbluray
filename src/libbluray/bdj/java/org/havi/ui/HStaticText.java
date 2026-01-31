@@ -34,6 +34,7 @@ public class HStaticText extends HVisible implements HNoInputPreferred {
     public HStaticText(String textNormal, int x, int y, int width, int height) {
         super(getDefaultLook(), x, y, width, height);
         setTextContent(textNormal, ALL_STATES);
+        setBordersEnabled(false);
         logger.info("HStaticText " + textNormal + " at " + x + "," + y + " " + width + "x" + height);
     }
 
