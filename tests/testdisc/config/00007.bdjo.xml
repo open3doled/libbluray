@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  BDJO configuration for Color Test Xlet (Title 7)
+  Tests foreground/background colors and alpha transparency
+-->
+<bdjo>
+    <version>V_0200</version>
+    
+    <terminalInfo>
+        <defaultFontFile>*****</defaultFontFile>
+        <initialHaviConfig>HD_1920_1080</initialHaviConfig>
+        <menuCallMask>false</menuCallMask>
+        <titleSearchMask>false</titleSearchMask>
+    </terminalInfo>
+    
+    <appCacheInfo>
+        <entries>
+            <type>1</type>
+            <name>00000</name>
+            <language>*.*</language>
+        </entries>
+    </appCacheInfo>
+    
+    <applicationManagementTable>
+        <applications>
+            <controlCode>1</controlCode>
+            <organizationId>0x7fff0001</organizationId>
+            <applicationId>0x4007</applicationId>
+            <type>0x1</type>
+            <applicationDescriptor>
+                <priority>128</priority>
+                <binding>TITLE_BOUND_DISC_BOUND</binding>
+                <visibility>V_11</visibility>
+                <initialClassName>org.videolan.test.ColorTestXlet</initialClassName>
+                <baseDirectory>00000</baseDirectory>
+                <classpathExtension></classpathExtension>
+                <profiles>
+                    <profile>1</profile>
+                    <majorVersion>1</majorVersion>
+                    <minorVersion>0</minorVersion>
+                    <microVersion>0</microVersion>
+                </profiles>
+            </applicationDescriptor>
+        </applications>
+    </applicationManagementTable>
+    
+    <tableOfAccessiblePlayLists>
+        <accessToAllFlag>true</accessToAllFlag>
+        <autostartFirstPlayListFlag>false</autostartFirstPlayListFlag>
+    </tableOfAccessiblePlayLists>
+    
+    <keyInterestTable>0xffe00000</keyInterestTable>
+    <fileAccessInfo>.</fileAccessInfo>
+</bdjo>

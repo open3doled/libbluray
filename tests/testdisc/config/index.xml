@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  index.bdmv configuration for HAVI Test Disc
+  Uses HD Cookbook XML format (subset - unsupported features will error)
+  
+  Disc Structure:
+    - First Playback: Menu (00000)
+    - Top Menu: Menu (00000) - pressing Top Menu returns to menu
+    - Title 1: Alignment Test (00001)
+    - Title 2: Background/Border Test (00002)
+    - Title 3: States Test (00003)
+    - Title 4: Font Test (00004)
+    - Title 5: Multiline Text Test (00005)
+    - Title 6: Resize Test (00006)
+    - Title 7: Color Test (00007)
+    - Title 8: Graphic States Test (00008)
+    - Title 9: Graphic Alignment Test (00009)
+  
+  Note: Menu is accessed via firstPlayback/topMenu, not as a numbered title.
+  Titles are 1-indexed in BD-J.
+-->
+<index>
+    <version>0200</version>
+    
+    <indexes>
+        <firstPlayback>
+            <bdjObject>
+                <bdjoFileName>00000</bdjoFileName>
+            </bdjObject>
+        </firstPlayback>
+        
+        <topMenu>
+            <bdjObject>
+                <bdjoFileName>00000</bdjoFileName>
+            </bdjObject>
+        </topMenu>
+        
+        <titles>
+            <!-- Title 1: Alignment Test -->
+            <title>
+                <titleAccessType>V_01</titleAccessType>
+                <bdjObject>
+                    <bdjoFileName>00001</bdjoFileName>
+                </bdjObject>
+            </title>
+            
+            <!-- Title 2: Background/Border Test -->
+            <title>
+                <titleAccessType>V_01</titleAccessType>
+                <bdjObject>
+                    <bdjoFileName>00002</bdjoFileName>
+                </bdjObject>
+            </title>
+            
+            <!-- Title 3: States Test -->
+            <title>
+                <titleAccessType>V_01</titleAccessType>
+                <bdjObject>
+                    <bdjoFileName>00003</bdjoFileName>
+                </bdjObject>
+            </title>
+            
+            <!-- Title 4: Font Test -->
+            <title>
+                <titleAccessType>V_01</titleAccessType>
+                <bdjObject>
+                    <bdjoFileName>00004</bdjoFileName>
+                </bdjObject>
+            </title>
+            
+            <!-- Title 5: Multiline Text Test -->
+            <title>
+                <titleAccessType>V_01</titleAccessType>
+                <bdjObject>
+                    <bdjoFileName>00005</bdjoFileName>
+                </bdjObject>
+            </title>
+            
+            <!-- Title 6: Resize Test -->
+            <title>
+                <titleAccessType>V_01</titleAccessType>
+                <bdjObject>
+                    <bdjoFileName>00006</bdjoFileName>
+                </bdjObject>
+            </title>
+            
+            <!-- Title 7: Color Test -->
+            <title>
+                <titleAccessType>V_01</titleAccessType>
+                <bdjObject>
+                    <bdjoFileName>00007</bdjoFileName>
+                </bdjObject>
+            </title>
+            
+            <!-- Title 8: Graphic States Test -->
+            <title>
+                <titleAccessType>V_01</titleAccessType>
+                <bdjObject>
+                    <bdjoFileName>00008</bdjoFileName>
+                </bdjObject>
+            </title>
+            
+            <!-- Title 9: Graphic Alignment Test -->
+            <title>
+                <titleAccessType>V_01</titleAccessType>
+                <bdjObject>
+                    <bdjoFileName>00009</bdjoFileName>
+                </bdjObject>
+            </title>
+        </titles>
+    </indexes>
+</index>
