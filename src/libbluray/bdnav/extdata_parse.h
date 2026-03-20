@@ -27,7 +27,7 @@
 
 BD_PRIVATE int bdmv_parse_extension_data(BITSTREAM *bits,
                                          uint32_t start_address,
-                                         int (*handler)(BITSTREAM*, int, int, void*),
+                                         int (*handler)(BITSTREAM*, int, int, uint32_t, void*),
                                          void *handle);
 
 #endif // _EXTDATA_PARSE_H_

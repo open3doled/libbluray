@@ -103,6 +103,20 @@ static int _stream_cmp(const MPLS_STREAM *a, const MPLS_STREAM *b)
         a->pid         == b->pid         &&
         a->subpath_id  == b->subpath_id  &&
         a->subclip_id  == b->subclip_id  &&
+        a->pg_offset_sequence_id == b->pg_offset_sequence_id &&
+        a->pg_dialog_region_offset_valid == b->pg_dialog_region_offset_valid &&
+        a->pg_is_ss == b->pg_is_ss &&
+        a->pg_top_as_flag == b->pg_top_as_flag &&
+        a->pg_bottom_as_flag == b->pg_bottom_as_flag &&
+        a->pg_ss_offset_sequence_id == b->pg_ss_offset_sequence_id &&
+        a->pg_ss_left_stream_type == b->pg_ss_left_stream_type &&
+        a->pg_ss_right_stream_type == b->pg_ss_right_stream_type &&
+        a->pg_ss_left_subpath_id == b->pg_ss_left_subpath_id &&
+        a->pg_ss_left_subclip_id == b->pg_ss_left_subclip_id &&
+        a->pg_ss_right_subpath_id == b->pg_ss_right_subpath_id &&
+        a->pg_ss_right_subclip_id == b->pg_ss_right_subclip_id &&
+        a->pg_ss_left_pid == b->pg_ss_left_pid &&
+        a->pg_ss_right_pid == b->pg_ss_right_pid &&
         a->format      == b->format      &&
         a->rate        == b->rate        &&
         a->char_code   == b->char_code   &&

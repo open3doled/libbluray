@@ -5411,6 +5411,20 @@ static int _copy_streams(const NAV_CLIP *clip, BLURAY_STREAM_INFO **pstreams,
             streams[ii].subpath_id = si->subpath_id;
         else
             streams[ii].subpath_id = -1;
+        streams[ii].pg_offset_sequence_id = si[ii].pg_offset_sequence_id;
+        streams[ii].pg_dialog_region_offset_valid = si[ii].pg_dialog_region_offset_valid;
+        streams[ii].pg_is_ss = si[ii].pg_is_ss;
+        streams[ii].pg_top_as_flag = si[ii].pg_top_as_flag;
+        streams[ii].pg_bottom_as_flag = si[ii].pg_bottom_as_flag;
+        streams[ii].pg_ss_offset_sequence_id = si[ii].pg_ss_offset_sequence_id;
+        streams[ii].pg_ss_left_stream_type = si[ii].pg_ss_left_stream_type;
+        streams[ii].pg_ss_right_stream_type = si[ii].pg_ss_right_stream_type;
+        streams[ii].pg_ss_left_subpath_id = si[ii].pg_ss_left_subpath_id;
+        streams[ii].pg_ss_left_subclip_id = si[ii].pg_ss_left_subclip_id;
+        streams[ii].pg_ss_right_subpath_id = si[ii].pg_ss_right_subpath_id;
+        streams[ii].pg_ss_right_subclip_id = si[ii].pg_ss_right_subclip_id;
+        streams[ii].pg_ss_left_pid = si[ii].pg_ss_left_pid;
+        streams[ii].pg_ss_right_pid = si[ii].pg_ss_right_pid;
     }
 
     return 1;

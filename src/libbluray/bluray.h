@@ -248,6 +248,20 @@ typedef struct bd_stream_info {
     uint16_t    pid;          /**< mpeg-ts PID */
     uint8_t     aspect;       /**< Stream video aspect ratio (\ref bd_video_aspect_e) */
     uint8_t     subpath_id;   /**< Sub path identifier (= separate mpeg-ts mux / .m2ts file) */
+    uint8_t     pg_offset_sequence_id;          /**< 3D subtitle offset-sequence / plane id, 0xff if not present */
+    uint8_t     pg_dialog_region_offset_valid;  /**< 3D subtitle dialog-region offset flag */
+    uint8_t     pg_is_ss;                       /**< 1 if stream uses stereo-PGS metadata */
+    uint8_t     pg_top_as_flag;                 /**< 1 if top-AS subtitle metadata is present */
+    uint8_t     pg_bottom_as_flag;              /**< 1 if bottom-AS subtitle metadata is present */
+    uint8_t     pg_ss_offset_sequence_id;       /**< Stereo-PGS offset-sequence id, 0xff if not present */
+    uint8_t     pg_ss_left_stream_type;         /**< Stereo-PGS left-eye stream entry type, 0xff if not present */
+    uint8_t     pg_ss_right_stream_type;        /**< Stereo-PGS right-eye stream entry type, 0xff if not present */
+    uint8_t     pg_ss_left_subpath_id;          /**< Stereo-PGS left-eye subpath id, 0xff if not present */
+    uint8_t     pg_ss_left_subclip_id;          /**< Stereo-PGS left-eye subclip id, 0xff if not present */
+    uint8_t     pg_ss_right_subpath_id;         /**< Stereo-PGS right-eye subpath id, 0xff if not present */
+    uint8_t     pg_ss_right_subclip_id;         /**< Stereo-PGS right-eye subclip id, 0xff if not present */
+    uint16_t    pg_ss_left_pid;                 /**< Stereo-PGS left-eye PID, 0xffff if not present */
+    uint16_t    pg_ss_right_pid;                /**< Stereo-PGS right-eye PID, 0xffff if not present */
 } BLURAY_STREAM_INFO;
 
 /** Clip information */

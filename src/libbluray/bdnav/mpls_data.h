@@ -43,6 +43,21 @@ typedef struct
     uint8_t         hdr_plus_flag;
     uint8_t         char_code;
     char            lang[4];
+    /* 3D subtitle metadata (MPLS extension 2.1 / STN Table SS) */
+    uint8_t         pg_offset_sequence_id;
+    uint8_t         pg_dialog_region_offset_valid;
+    uint8_t         pg_is_ss;
+    uint8_t         pg_top_as_flag;
+    uint8_t         pg_bottom_as_flag;
+    uint8_t         pg_ss_offset_sequence_id;
+    uint8_t         pg_ss_left_stream_type;
+    uint8_t         pg_ss_right_stream_type;
+    uint8_t         pg_ss_left_subpath_id;
+    uint8_t         pg_ss_left_subclip_id;
+    uint8_t         pg_ss_right_subpath_id;
+    uint8_t         pg_ss_right_subclip_id;
+    uint16_t        pg_ss_left_pid;
+    uint16_t        pg_ss_right_pid;
     // Secondary audio specific fields
     uint8_t         sa_num_primary_audio_ref;
     uint8_t        *sa_primary_audio_ref;

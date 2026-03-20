@@ -113,7 +113,7 @@ _parse_header(BITSTREAM *bits, MPLS_PL *pl)
 }
 
 static int
-_parse_stream(BITSTREAM *bits, MPLS_STREAM *s)
+_parse_stream_entry(BITSTREAM *bits, MPLS_STREAM *s)
 {
     int len;
     int64_t pos;
@@ -150,6 +150,15 @@ _parse_stream(BITSTREAM *bits, MPLS_STREAM *s)
     if (bs_seek_byte(bits, pos + len) < 0) {
         return 0;
     }
+
+    return 1;
+}
+
+static int
+_parse_stream_attributes(BITSTREAM *bits, MPLS_STREAM *s)
+{
+    int len;
+    int64_t pos;
 
     len = bs_read(bits, 8);
     pos = bs_pos(bits) >> 3;
@@ -209,6 +218,30 @@ _parse_stream(BITSTREAM *bits, MPLS_STREAM *s)
     }
 
     return 1;
+}
+
+static int
+_parse_stream(BITSTREAM *bits, MPLS_STREAM *s)
+{
+    memset(s, 0, sizeof(*s));
+    s->subpath_id = 0xff;
+    s->subclip_id = 0xff;
+    s->pg_offset_sequence_id = 0xff;
+    s->pg_ss_offset_sequence_id = 0xff;
+    s->pg_ss_left_stream_type = 0xff;
+    s->pg_ss_right_stream_type = 0xff;
+    s->pg_ss_left_subpath_id = 0xff;
+    s->pg_ss_left_subclip_id = 0xff;
+    s->pg_ss_right_subpath_id = 0xff;
+    s->pg_ss_right_subclip_id = 0xff;
+    s->pg_ss_left_pid = 0xffff;
+    s->pg_ss_right_pid = 0xffff;
+
+    if (!_parse_stream_entry(bits, s)) {
+        return 0;
+    }
+
+    return _parse_stream_attributes(bits, s);
 }
 
 static int
@@ -433,6 +466,128 @@ _clean_stn(MPLS_STN *stn)
     X_FREE(stn->secondary_audio);
     X_FREE(stn->secondary_video);
     X_FREE(stn->dv);
+}
+
+static int
+_parse_stn_ss_pg_stream(BITSTREAM *bits, MPLS_STREAM *s)
+{
+    MPLS_STREAM tmp;
+
+    s->pg_offset_sequence_id = bs_read(bits, 8);
+    bs_skip(bits, 4);
+    s->pg_dialog_region_offset_valid = bs_read(bits, 1);
+    s->pg_is_ss = bs_read(bits, 1);
+    s->pg_top_as_flag = bs_read(bits, 1);
+    s->pg_bottom_as_flag = bs_read(bits, 1);
+
+    if (s->pg_is_ss) {
+        memset(&tmp, 0, sizeof(tmp));
+        tmp.subpath_id = 0xff;
+        tmp.subclip_id = 0xff;
+        if (!_parse_stream_entry(bits, &tmp)) {
+            return 0;
+        }
+        s->pg_ss_left_stream_type = tmp.stream_type;
+        s->pg_ss_left_subpath_id  = tmp.subpath_id;
+        s->pg_ss_left_subclip_id  = tmp.subclip_id;
+        s->pg_ss_left_pid         = tmp.pid;
+
+        memset(&tmp, 0, sizeof(tmp));
+        tmp.subpath_id = 0xff;
+        tmp.subclip_id = 0xff;
+        if (!_parse_stream_entry(bits, &tmp)) {
+            return 0;
+        }
+        s->pg_ss_right_stream_type = tmp.stream_type;
+        s->pg_ss_right_subpath_id  = tmp.subpath_id;
+        s->pg_ss_right_subclip_id  = tmp.subclip_id;
+        s->pg_ss_right_pid         = tmp.pid;
+
+        bs_skip(bits, 8);
+        s->pg_ss_offset_sequence_id = bs_read(bits, 8);
+    }
+
+    if (s->pg_top_as_flag) {
+        memset(&tmp, 0, sizeof(tmp));
+        tmp.subpath_id = 0xff;
+        tmp.subclip_id = 0xff;
+        if (!_parse_stream_entry(bits, &tmp)) {
+            return 0;
+        }
+        bs_skip(bits, 16);
+    }
+
+    if (s->pg_bottom_as_flag) {
+        memset(&tmp, 0, sizeof(tmp));
+        tmp.subpath_id = 0xff;
+        tmp.subclip_id = 0xff;
+        if (!_parse_stream_entry(bits, &tmp)) {
+            return 0;
+        }
+        bs_skip(bits, 16);
+    }
+
+    return 1;
+}
+
+static int
+_parse_stn_ss(BITSTREAM *bits, MPLS_STN *stn, int64_t end_pos)
+{
+    int len;
+    int ii;
+    int64_t pos;
+
+    if (!bs_is_align(bits, 0x07)) {
+        BD_DEBUG(DBG_NAV | DBG_CRIT, "_parse_stn_ss: Stream alignment error\n");
+    }
+
+    len = bs_read(bits, 16);
+    pos = bs_pos(bits) >> 3;
+    if (pos + len > end_pos) {
+        BD_DEBUG(DBG_NAV | DBG_CRIT, "STN Table SS entry exceeds extension block\n");
+        return 0;
+    }
+
+    bs_skip(bits, 16);
+
+    for (ii = 0; ii < stn->num_video; ii++) {
+        MPLS_STREAM tmp;
+        int attr_len;
+        int64_t attr_pos;
+
+        memset(&tmp, 0, sizeof(tmp));
+        tmp.subpath_id = 0xff;
+        tmp.subclip_id = 0xff;
+
+        if (!_parse_stream_entry(bits, &tmp)) {
+            BD_DEBUG(DBG_NAV | DBG_CRIT, "error parsing STN SS video stream entry\n");
+            return 0;
+        }
+
+        attr_len = bs_read(bits, 8);
+        attr_pos = bs_pos(bits) >> 3;
+        if (attr_pos + attr_len + 2 > end_pos) {
+            BD_DEBUG(DBG_NAV | DBG_CRIT, "STN Table SS video attributes exceed extension block\n");
+            return 0;
+        }
+        if (bs_seek_byte(bits, attr_pos + attr_len) < 0) {
+            return 0;
+        }
+        bs_skip(bits, 16);
+    }
+
+    for (ii = 0; ii < stn->num_pg; ii++) {
+        if (!_parse_stn_ss_pg_stream(bits, &stn->pg[ii])) {
+            BD_DEBUG(DBG_NAV | DBG_CRIT, "error parsing STN SS PG stream entry\n");
+            return 0;
+        }
+    }
+
+    if (bs_seek_byte(bits, pos + len) < 0) {
+        return 0;
+    }
+
+    return 1;
 }
 
 static int
@@ -1059,7 +1214,7 @@ _parse_static_metadata_extension(BITSTREAM *bits, MPLS_PL *pl)
 }
 
 static int
-_parse_mpls_extension(BITSTREAM *bits, int id1, int id2, void *handle)
+_parse_mpls_extension(BITSTREAM *bits, int id1, int id2, uint32_t ext_len, void *handle)
 {
     MPLS_PL *pl = (MPLS_PL*)handle;
 
@@ -1072,7 +1227,17 @@ _parse_mpls_extension(BITSTREAM *bits, int id1, int id2, void *handle)
 
     if (id1 == 2) {
         if (id2 == 1) {
-            return 0;
+            int ii;
+            int64_t end_pos = (bs_pos(bits) >> 3) + ext_len;
+
+            for (ii = 0; ii < pl->list_count && (bs_pos(bits) >> 3) < end_pos; ii++) {
+                if (!_parse_stn_ss(bits, &pl->play_item[ii].stn, end_pos)) {
+                    BD_DEBUG(DBG_NAV | DBG_CRIT, "error parsing STN Table SS extension for play item %d\n", ii);
+                    return 0;
+                }
+            }
+
+            return 1;
         }
         if (id2 == 2) {
             // SubPath entries extension

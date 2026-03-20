@@ -231,9 +231,10 @@ static int _parse_indx_extension_hevc(BITSTREAM *bs, INDX_ROOT *index)
 }
 
 static int
-_parse_indx_extension(BITSTREAM *bits, int id1, int id2, void *handle)
+_parse_indx_extension(BITSTREAM *bits, int id1, int id2, uint32_t ext_len, void *handle)
 {
     INDX_ROOT *index = (INDX_ROOT *)handle;
+    (void)ext_len;
     (void)bits;
 
     if (id1 == 3) {
