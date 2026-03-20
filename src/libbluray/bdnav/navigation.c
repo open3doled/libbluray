@@ -707,6 +707,18 @@ void _nav_title_close(NAV_TITLE *title)
         X_FREE(title->sub_path);
     }
 
+    if (title->ext_sub_path) {
+        for (ss = 0; ss < title->ext_sub_path_count; ss++) {
+            if (title->ext_sub_path[ss].clip_list.clip) {
+                for (ii = 0; ii < title->ext_sub_path[ss].clip_list.count; ii++) {
+                    clpi_unref(&title->ext_sub_path[ss].clip_list.clip[ii].cl);
+                }
+                X_FREE(title->ext_sub_path[ss].clip_list.clip);
+            }
+        }
+        X_FREE(title->ext_sub_path);
+    }
+
     if (title->clip_list.clip) {
         for (ii = 0; ii < title->clip_list.count; ii++) {
             clpi_unref(&title->clip_list.clip[ii].cl);
@@ -800,6 +812,40 @@ NAV_TITLE* nav_title_open(BD_DISC *disc, const char *playlist, unsigned angle)
             pos = time = 0;
             for (ii = 0; ii < sub_path->clip_list.count; ii++) {
                 const MPLS_SUB_PI *pi   = &title->pl->sub_path[ss].sub_play_item[ii];
+                NAV_CLIP    *clip = &sub_path->clip_list.clip[ii];
+
+                _fill_clip(title, pi->clip, pi->connection_condition, pi->in_time, pi->out_time, 0,
+                           0, 0, clip, ii, &pos, &time);
+            }
+        }
+    }
+
+    // extension sub paths
+    if (title->pl->ext_sub_count > 0) {
+        title->ext_sub_path_count = title->pl->ext_sub_count;
+        title->ext_sub_path       = calloc(title->ext_sub_path_count, sizeof(NAV_SUB_PATH));
+        if (!title->ext_sub_path) {
+          _nav_title_close(title);
+          return NULL;
+        }
+
+        for (ss = 0; ss < title->ext_sub_path_count; ss++) {
+            NAV_SUB_PATH *sub_path = &title->ext_sub_path[ss];
+
+            sub_path->type            = title->pl->ext_sub_path[ss].type;
+            sub_path->clip_list.count = title->pl->ext_sub_path[ss].sub_playitem_count;
+            if (!sub_path->clip_list.count)
+              continue;
+
+            sub_path->clip_list.clip  = calloc(sub_path->clip_list.count, sizeof(NAV_CLIP));
+            if (!sub_path->clip_list.clip) {
+              _nav_title_close(title);
+              return NULL;
+            }
+
+            pos = time = 0;
+            for (ii = 0; ii < sub_path->clip_list.count; ii++) {
+                const MPLS_SUB_PI *pi   = &title->pl->ext_sub_path[ss].sub_play_item[ii];
                 NAV_CLIP    *clip = &sub_path->clip_list.clip[ii];
 
                 _fill_clip(title, pi->clip, pi->connection_condition, pi->in_time, pi->out_time, 0,

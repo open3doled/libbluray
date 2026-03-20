@@ -1,6 +1,24 @@
 # Libbluray
 **Libbluray** is an open-source **lib**rary designed for **Blu-Ray** Discs playback for media players, like **VLC** or **MPlayer**.
 
+## Open3DOLED fork notes
+
+This fork contains the Open3DOLED MVC integration maintained for 3D Blu-ray
+playback experiments and runtime validation.
+
+The Open3DOLED changes on branch `open3doled_001` are intentionally small in
+surface area and are focused on:
+
+- exposing MVC-related clip and subpath metadata needed during navigation
+- adding paired base/dependent stream handling in the main libbluray playback
+  path
+- emitting the merged MVC-oriented access pattern expected by the Open3DOLED
+  VLC integration
+- keeping the fork buildable with the upstream Meson build
+
+Project-specific investigation notes and machine-local analysis logs are kept
+outside this fork and are not part of the tracked upstream-facing source tree.
+
 
 
 ## Goals and features
@@ -75,4 +93,3 @@ All documentation about libbluray is available [here](https://videolan.videolan.
 4. Run `mkdir build && cd build` to create a build directory and enter it
 5. Run `meson setup ..` to configure meson, add `--default-library=static` if static linking is desired
 6. Run `ninja` to compile
-

@@ -116,6 +116,8 @@ struct nav_title_s {
 
     unsigned      sub_path_count;
     NAV_SUB_PATH  *sub_path;
+    unsigned      ext_sub_path_count;
+    NAV_SUB_PATH  *ext_sub_path;
 
     uint32_t      packets;
     uint32_t      duration;

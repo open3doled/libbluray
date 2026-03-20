@@ -6,6 +6,7 @@ libbluray_api_headers = files(
     '../file/filesystem.h',
     '../util/log_control.h',
     'bluray.h',
+    'bluray_open3d_mvc.h',
     'bdnav/clpi_data.h',
     'keys.h',
     'bdnav/meta_data.h',

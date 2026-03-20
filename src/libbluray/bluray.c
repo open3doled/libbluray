@@ -25,6 +25,7 @@
 
 #include "bluray-version.h"
 #include "bluray.h"
+#include "bluray_open3d_mvc.h"
 #include "bluray_internal.h"
 #include "keys.h"
 #include "register.h"
@@ -35,6 +36,8 @@
 #include "util/strutl.h"
 #include "util/mutex.h"
 #include "bdnav/bdid_parse.h"
+#include "bdnav/clpi_data.h"
+#include "bdnav/clpi_parse.h"
 #include "bdnav/navigation.h"
 #include "bdnav/index_parse.h"
 #include "bdnav/meta_parse.h"
@@ -45,8 +48,10 @@
 #include "hdmv/mobj_parse.h"
 #include "decoders/graphics_controller.h"
 #include "decoders/hdmv_pids.h"
+#include "decoders/m2ts_demux.h"
 #include "decoders/m2ts_filter.h"
 #include "decoders/overlay.h"
+#include "decoders/pes_buffer.h"
 #include "disc/disc.h"
 #include "disc/enc_info.h"
 #include "file/file.h"
@@ -54,6 +59,7 @@
 #include "bdj/bdjo_parse.h"
 
 #include <stdio.h> // SEEK_
+#include <stdarg.h>
 #include <stdlib.h>
 #include <inttypes.h>
 #include <string.h>
@@ -97,6 +103,44 @@ typedef struct {
     uint8_t  *buf;
 } BD_PRELOAD;
 
+typedef struct bd_open3d_mvc_unit_node_s BD_OPEN3D_MVC_UNIT_NODE;
+struct bd_open3d_mvc_unit_node_s {
+    BD_OPEN3D_MVC_UNIT      unit;
+    uint8_t                *buf;
+    BD_OPEN3D_MVC_UNIT_NODE *next;
+};
+
+typedef struct {
+    uint8_t                valid;
+    BD_OPEN3D_MVC_INFO     info;
+    const NAV_CLIP        *dependent_clip;
+    BD_STREAM              dep_st;
+    M2TS_DEMUX            *base_demux;
+    M2TS_DEMUX            *dep_demux;
+    PES_BUFFER            *dep_queue;
+    BD_OPEN3D_MVC_UNIT_NODE *unit_head;
+    BD_OPEN3D_MVC_UNIT_NODE *unit_tail;
+    int64_t                last_unit_base_time;
+    int64_t                last_exact_base_time;
+    uint8_t                strict_relock_exacts_needed;
+    uint8_t                initial_base_only_aus;
+    uint8_t                stale_relaxed_active;
+    uint8_t                pending_hard_relock;
+    uint8_t                seek_restart_pending;
+    uint8_t                seek_restart_allow_non_idr;
+    uint8_t                started;
+    uint8_t               *startup_base_prefix;
+    uint32_t               startup_base_prefix_len;
+    uint8_t                startup_base_prefix_used;
+    uint8_t               *startup_dep_prefix;
+    uint32_t               startup_dep_prefix_len;
+    uint8_t                startup_dep_prefix_used;
+    uint8_t                dep_seek_pending;
+    uint32_t               dep_seek_pkt;
+    uint32_t               dep_seek_time;
+    uint8_t                dep_int_buf[6144];
+} BD_OPEN3D_MVC_RUNTIME;
+
 struct bluray {
 
     BD_MUTEX          mutex;  /* protect API function access to internal data */
@@ -117,6 +161,7 @@ struct bluray {
     BD_STREAM      st0;       /* main path */
     BD_PRELOAD     st_ig;     /* preloaded IG stream sub path */
     BD_PRELOAD     st_textst; /* preloaded TextST sub path */
+    BD_OPEN3D_MVC_RUNTIME open3d_mvc;
 
     /* buffer for bd_read(): current aligned unit of main stream (st0) */
     uint8_t        int_buf[6144];
@@ -172,6 +217,15 @@ struct bluray {
     BD_ARGB_BUFFER      *argb_buffer;
     BD_MUTEX             argb_buffer_mutex;
 };
+
+static void _close_m2ts(BD_STREAM *st);
+static int  _open_m2ts(BLURAY *bd, BD_STREAM *st);
+static int  _read_block(BLURAY *bd, BD_STREAM *st, uint8_t *buf);
+static void _open3d_mvc_trace(const char *fmt, ...);
+static int _open3d_mvc_contains_nal_type(const uint8_t *buf, uint32_t len,
+                                         uint8_t nal_type);
+static int64_t _seek_stream(BLURAY *bd, BD_STREAM *st,
+                            const NAV_CLIP *clip, uint32_t clip_pkt);
 
 /* Stream Packet Number = byte offset / 192. Avoid 64-bit division. */
 #define SPN(pos) (((uint32_t)((pos) >> 6)) / 3)
@@ -564,6 +618,2528 @@ static void _init_textst_timer(BLURAY *bd)
         bd->gc_wakeup_time = clip_time;
         bd->gc_wakeup_pos = 0;
         _update_textst_timer(bd);
+    }
+}
+
+static void _open3d_copy_clip_id(char dst[6], const char *src)
+{
+    memset(dst, 0, 6);
+    if (!src) {
+        return;
+    }
+    memcpy(dst, src, strnlen(src, 5));
+}
+
+static void _open3d_mvc_free_unit_queue(BD_OPEN3D_MVC_RUNTIME *mvc)
+{
+    while (mvc && mvc->unit_head) {
+        BD_OPEN3D_MVC_UNIT_NODE *node = mvc->unit_head;
+        mvc->unit_head = node->next;
+        X_FREE(node->buf);
+        X_FREE(node);
+    }
+
+    if (mvc) {
+        mvc->unit_tail = NULL;
+    }
+}
+
+static void _open3d_mvc_flush_sidecar(BD_OPEN3D_MVC_RUNTIME *mvc)
+{
+    if (!mvc) {
+        return;
+    }
+
+    _close_m2ts(&mvc->dep_st);
+    m2ts_demux_free(&mvc->base_demux);
+    m2ts_demux_free(&mvc->dep_demux);
+    pes_buffer_free(&mvc->dep_queue);
+    _open3d_mvc_free_unit_queue(mvc);
+    X_FREE(mvc->startup_base_prefix);
+    mvc->startup_base_prefix_len = 0;
+    mvc->startup_base_prefix_used = 0;
+    X_FREE(mvc->startup_dep_prefix);
+    mvc->startup_dep_prefix_len = 0;
+    mvc->startup_dep_prefix_used = 0;
+    mvc->last_unit_base_time = (int64_t)-1;
+    mvc->last_exact_base_time = (int64_t)-1;
+    mvc->strict_relock_exacts_needed = 0;
+    mvc->stale_relaxed_active = 0;
+    mvc->pending_hard_relock = 0;
+    mvc->seek_restart_pending = 0;
+    mvc->seek_restart_allow_non_idr = 0;
+    mvc->dependent_clip = NULL;
+}
+
+static void _open3d_mvc_reset_runtime(BLURAY *bd)
+{
+    if (bd) {
+        _open3d_mvc_flush_sidecar(&bd->open3d_mvc);
+        memset(&bd->open3d_mvc, 0, sizeof(bd->open3d_mvc));
+    }
+}
+
+static int _open3d_mvc_runtime_matches_current(BLURAY *bd, unsigned main_playitem_index)
+{
+    if (!bd || !bd->open3d_mvc.valid || !bd->st0.clip) {
+        return 0;
+    }
+
+    if (bd->open3d_mvc.info.playitem_index != (int32_t)main_playitem_index) {
+        return 0;
+    }
+
+    if (strncmp(bd->open3d_mvc.info.base_clip_id, bd->st0.clip->name, 5)) {
+        return 0;
+    }
+
+    return 1;
+}
+
+static unsigned _open3d_current_playitem_index(BLURAY *bd)
+{
+    return bd->st0.clip ? bd->st0.clip->ref : 0;
+}
+
+static const MPLS_STREAM *_open3d_pick_base_stream(const MPLS_STN *stn)
+{
+    unsigned ii;
+
+    if (!stn) {
+        return NULL;
+    }
+
+    for (ii = 0; ii < stn->num_video; ii++) {
+        if (stn->video[ii].coding_type == BLURAY_STREAM_TYPE_VIDEO_H264) {
+            return &stn->video[ii];
+        }
+    }
+    if (stn->num_video > 0) {
+        return &stn->video[0];
+    }
+
+    return NULL;
+}
+
+static const MPLS_STREAM *_open3d_pick_dependent_stream(const MPLS_STN *stn)
+{
+    unsigned ii;
+
+    if (!stn) {
+        return NULL;
+    }
+
+    for (ii = 0; ii < stn->num_secondary_video; ii++) {
+        if (stn->secondary_video[ii].coding_type == 0x20) {
+            return &stn->secondary_video[ii];
+        }
+    }
+    if (stn->num_secondary_video > 0) {
+        return &stn->secondary_video[0];
+    }
+
+    return NULL;
+}
+
+static uint16_t _open3d_pick_base_pid_from_clip(const NAV_CLIP *clip)
+{
+    unsigned ii;
+
+    if (!clip || !clip->cl) {
+        return 0;
+    }
+
+    for (ii = 0; ii < clip->cl->program.num_prog; ii++) {
+        const CLPI_PROG *prog = &clip->cl->program.progs[ii];
+        unsigned jj;
+
+        for (jj = 0; jj < prog->num_streams; jj++) {
+            if (prog->streams[jj].coding_type == BLURAY_STREAM_TYPE_VIDEO_H264) {
+                return prog->streams[jj].pid;
+            }
+        }
+        for (jj = 0; jj < prog->num_streams; jj++) {
+            switch (prog->streams[jj].coding_type) {
+                case BLURAY_STREAM_TYPE_VIDEO_MPEG1:
+                case BLURAY_STREAM_TYPE_VIDEO_MPEG2:
+                case BLURAY_STREAM_TYPE_VIDEO_VC1:
+                case BLURAY_STREAM_TYPE_VIDEO_H264:
+                case BLURAY_STREAM_TYPE_VIDEO_HEVC:
+                    return prog->streams[jj].pid;
+                default:
+                    break;
+            }
+        }
+    }
+
+    return 0;
+}
+
+static uint16_t _open3d_pick_dependent_pid_from_clip(const NAV_CLIP *clip)
+{
+    unsigned ii;
+
+    if (!clip || !clip->cl) {
+        return 0;
+    }
+
+    for (ii = 0; ii < clip->cl->program_ss.num_prog; ii++) {
+        const CLPI_PROG *prog = &clip->cl->program_ss.progs[ii];
+        unsigned jj;
+
+        for (jj = 0; jj < prog->num_streams; jj++) {
+            if (prog->streams[jj].coding_type == 0x20) {
+                return prog->streams[jj].pid;
+            }
+        }
+        if (prog->num_streams > 0) {
+            return prog->streams[0].pid;
+        }
+    }
+
+    return 0;
+}
+
+static uint16_t _open3d_pick_base_pid(const MPLS_STN *stn, const NAV_CLIP *clip)
+{
+    const MPLS_STREAM *stream = _open3d_pick_base_stream(stn);
+
+    if (stream && stream->pid) {
+        return stream->pid;
+    }
+
+    return _open3d_pick_base_pid_from_clip(clip);
+}
+
+static uint16_t _open3d_pick_dependent_pid(const MPLS_STN *stn, const NAV_CLIP *clip)
+{
+    const MPLS_STREAM *stream = _open3d_pick_dependent_stream(stn);
+
+    if (stream && stream->pid) {
+        return stream->pid;
+    }
+
+    return _open3d_pick_dependent_pid_from_clip(clip);
+}
+
+static int _open3d_fill_resolved_clip(BD_OPEN3D_MVC_INFO *info,
+                                      const NAV_SUB_PATH *nav_sub_path,
+                                      const MPLS_SUB *mpls_sub_path,
+                                      uint8_t subpath_kind,
+                                      unsigned subpath_index,
+                                      unsigned subclip_index,
+                                      const NAV_CLIP **resolved_clip)
+{
+    const MPLS_SUB_PI *spi;
+    const NAV_CLIP *clip;
+
+    if (!info || !nav_sub_path || !mpls_sub_path) {
+        return 0;
+    }
+    if (subclip_index >= nav_sub_path->clip_list.count ||
+        subclip_index >= mpls_sub_path->sub_playitem_count) {
+        return 0;
+    }
+
+    spi = &mpls_sub_path->sub_play_item[subclip_index];
+    clip = &nav_sub_path->clip_list.clip[subclip_index];
+
+    info->subpath_kind = subpath_kind;
+    info->subpath_type = nav_sub_path->type;
+    info->sync_play_item_id = spi->sync_play_item_id;
+    info->sync_pts = spi->sync_pts;
+    info->subpath_index = subpath_index;
+    info->subclip_index = subclip_index;
+
+    if (spi->clip && spi->clip[0].clip_id[0]) {
+        _open3d_copy_clip_id(info->dependent_clip_id, spi->clip[0].clip_id);
+    } else {
+        _open3d_copy_clip_id(info->dependent_clip_id, clip->name);
+    }
+    if (resolved_clip) {
+        *resolved_clip = clip;
+    }
+
+    return 1;
+}
+
+static int _open3d_try_resolve_subpath_exact(BD_OPEN3D_MVC_INFO *info,
+                                             const MPLS_STREAM *dep_stream,
+                                             const NAV_SUB_PATH *nav_sub_paths,
+                                             unsigned nav_sub_path_count,
+                                             const MPLS_SUB *mpls_sub_paths,
+                                             unsigned mpls_sub_path_count,
+                                             uint8_t subpath_kind,
+                                             const NAV_CLIP **resolved_clip)
+{
+    unsigned subpath_index;
+    unsigned subclip_index;
+
+    if (!info || !dep_stream || !nav_sub_paths || !mpls_sub_paths) {
+        return 0;
+    }
+
+    subpath_index = dep_stream->subpath_id;
+    subclip_index = dep_stream->subclip_id;
+
+    if (subpath_index >= nav_sub_path_count || subpath_index >= mpls_sub_path_count) {
+        return 0;
+    }
+    if (nav_sub_paths[subpath_index].type != mpls_sub_path_ss_video ||
+        mpls_sub_paths[subpath_index].type != mpls_sub_path_ss_video) {
+        return 0;
+    }
+
+    return _open3d_fill_resolved_clip(info,
+                                      &nav_sub_paths[subpath_index],
+                                      &mpls_sub_paths[subpath_index],
+                                      subpath_kind,
+                                      subpath_index,
+                                      subclip_index,
+                                      resolved_clip);
+}
+
+static int _open3d_try_resolve_subpath_scan(BD_OPEN3D_MVC_INFO *info,
+                                            unsigned main_playitem_index,
+                                            const NAV_SUB_PATH *nav_sub_paths,
+                                            unsigned nav_sub_path_count,
+                                            const MPLS_SUB *mpls_sub_paths,
+                                            unsigned mpls_sub_path_count,
+                                            uint8_t subpath_kind,
+                                            const NAV_CLIP **resolved_clip)
+{
+    unsigned ss;
+    unsigned ii;
+
+    if (!info || !nav_sub_paths || !mpls_sub_paths) {
+        return 0;
+    }
+
+    for (ss = 0; ss < nav_sub_path_count && ss < mpls_sub_path_count; ss++) {
+        if (nav_sub_paths[ss].type != mpls_sub_path_ss_video ||
+            mpls_sub_paths[ss].type != mpls_sub_path_ss_video) {
+            continue;
+        }
+
+        for (ii = 0; ii < nav_sub_paths[ss].clip_list.count &&
+                      ii < mpls_sub_paths[ss].sub_playitem_count; ii++) {
+            if (mpls_sub_paths[ss].sub_play_item[ii].sync_play_item_id != main_playitem_index) {
+                continue;
+            }
+
+            return _open3d_fill_resolved_clip(info,
+                                              &nav_sub_paths[ss],
+                                              &mpls_sub_paths[ss],
+                                              subpath_kind,
+                                              ss,
+                                              ii,
+                                              resolved_clip);
+        }
+    }
+
+    return 0;
+}
+
+static int _open3d_mvc_refresh_runtime_locked(BLURAY *bd)
+{
+    BD_OPEN3D_MVC_INFO *info;
+    const MPLS_PI *pi;
+    const MPLS_STREAM *dep_stream;
+    const NAV_CLIP *base_clip;
+    const NAV_CLIP *resolved_dep_clip = NULL;
+    unsigned main_playitem_index;
+
+    if (!bd || !bd->title || !bd->title->pl || bd->title->pl->list_count < 1) {
+        return 0;
+    }
+
+    main_playitem_index = _open3d_current_playitem_index(bd);
+
+    if (_open3d_mvc_runtime_matches_current(bd, main_playitem_index)) {
+        return 1;
+    }
+
+    _open3d_mvc_reset_runtime(bd);
+
+    if (main_playitem_index >= bd->title->pl->list_count ||
+        main_playitem_index >= bd->title->clip_list.count) {
+        return 0;
+    }
+
+    pi = &bd->title->pl->play_item[main_playitem_index];
+    base_clip = &bd->title->clip_list.clip[main_playitem_index];
+    dep_stream = _open3d_pick_dependent_stream(&pi->stn);
+
+    info = &bd->open3d_mvc.info;
+    info->playitem_index = (int32_t)main_playitem_index;
+    info->base_pid = _open3d_pick_base_pid(&pi->stn, base_clip);
+
+    if (pi->clip && pi->clip[0].clip_id[0]) {
+        _open3d_copy_clip_id(info->base_clip_id, pi->clip[0].clip_id);
+    } else {
+        _open3d_copy_clip_id(info->base_clip_id, base_clip->name);
+    }
+
+    if (_open3d_try_resolve_subpath_exact(info, dep_stream,
+                                          bd->title->sub_path, bd->title->sub_path_count,
+                                          bd->title->pl->sub_path, bd->title->pl->sub_count,
+                                          BD_OPEN3D_MVC_SUBPATH_NORMAL,
+                                          &resolved_dep_clip) ||
+        _open3d_try_resolve_subpath_exact(info, dep_stream,
+                                          bd->title->ext_sub_path, bd->title->ext_sub_path_count,
+                                          bd->title->pl->ext_sub_path, bd->title->pl->ext_sub_count,
+                                          BD_OPEN3D_MVC_SUBPATH_EXTENSION,
+                                          &resolved_dep_clip) ||
+        _open3d_try_resolve_subpath_scan(info, main_playitem_index,
+                                         bd->title->sub_path, bd->title->sub_path_count,
+                                         bd->title->pl->sub_path, bd->title->pl->sub_count,
+                                         BD_OPEN3D_MVC_SUBPATH_NORMAL,
+                                         &resolved_dep_clip) ||
+        _open3d_try_resolve_subpath_scan(info, main_playitem_index,
+                                         bd->title->ext_sub_path, bd->title->ext_sub_path_count,
+                                         bd->title->pl->ext_sub_path, bd->title->pl->ext_sub_count,
+                                         BD_OPEN3D_MVC_SUBPATH_EXTENSION,
+                                         &resolved_dep_clip)) {
+        info->dependent_pid = _open3d_pick_dependent_pid(&pi->stn, resolved_dep_clip);
+        info->available = 1;
+        bd->open3d_mvc.dependent_clip = resolved_dep_clip;
+    }
+
+    bd->open3d_mvc.valid = 1;
+    _open3d_mvc_trace("assembler=lav playitem=%u base=%s dep=%s available=%u",
+                      main_playitem_index,
+                      info->base_clip_id,
+                      info->dependent_clip_id,
+                      info->available);
+    return 1;
+}
+
+static uint32_t _open3d_clpi_lookup_spn_cpi(const CLPI_CL *cl,
+                                            const CLPI_CPI *cpi,
+                                            uint32_t timestamp,
+                                            int before,
+                                            uint8_t stc_id)
+{
+    const CLPI_EP_MAP_ENTRY *entry;
+    int ii, jj;
+    uint32_t coarse_pts, pts;
+    uint32_t spn, coarse_spn, stc_spn;
+    int start, end;
+    int ref;
+
+    if (!cl || !cpi || cpi->num_stream_pid < 1 || !cpi->entry) {
+        if (before) {
+            return 0;
+        }
+        return cl ? cl->clip.num_source_packets : 0;
+    }
+
+    entry = &cpi->entry[0];
+
+    stc_spn = clpi_find_stc_spn(cl, stc_id);
+    for (ii = 0; ii < entry->num_ep_coarse; ii++) {
+        ref = entry->coarse[ii].ref_ep_fine_id;
+        if (entry->coarse[ii].spn_ep >= stc_spn) {
+            break;
+        }
+    }
+    if (ii >= entry->num_ep_coarse) {
+        return cl->clip.num_source_packets;
+    }
+    pts = ((uint64_t)(entry->coarse[ii].pts_ep & ~0x01) << 18) +
+          ((uint64_t)entry->fine[ref].pts_ep << 8);
+    if (pts > timestamp && ii) {
+        ii--;
+        coarse_pts = (uint32_t)(entry->coarse[ii].pts_ep & ~0x01) << 18;
+        coarse_spn = entry->coarse[ii].spn_ep;
+        start = entry->coarse[ii].ref_ep_fine_id;
+        end = entry->coarse[ii + 1].ref_ep_fine_id;
+        for (jj = start; jj < end; jj++) {
+            pts = coarse_pts + ((uint32_t)entry->fine[jj].pts_ep << 8);
+            spn = (coarse_spn & ~0x1FFFF) + entry->fine[jj].spn_ep;
+            if (stc_spn >= spn && pts > timestamp) {
+                break;
+            }
+        }
+        goto done;
+    }
+
+    start = ii;
+    for (ii = start; ii < entry->num_ep_coarse; ii++) {
+        ref = entry->coarse[ii].ref_ep_fine_id;
+        pts = ((uint64_t)(entry->coarse[ii].pts_ep & ~0x01) << 18) +
+              ((uint64_t)entry->fine[ref].pts_ep << 8);
+        if (pts > timestamp) {
+            break;
+        }
+    }
+    if (ii == 0) {
+        return 0;
+    }
+    ii--;
+    coarse_pts = (uint32_t)(entry->coarse[ii].pts_ep & ~0x01) << 18;
+    start = entry->coarse[ii].ref_ep_fine_id;
+    if (ii < entry->num_ep_coarse - 1) {
+        end = entry->coarse[ii + 1].ref_ep_fine_id;
+    } else {
+        end = entry->num_ep_fine;
+    }
+    for (jj = start; jj < end; jj++) {
+        pts = coarse_pts + ((uint32_t)entry->fine[jj].pts_ep << 8);
+        if (pts > timestamp) {
+            break;
+        }
+    }
+
+done:
+    if (jj == start && ii == 0) {
+        return 0;
+    }
+    if (jj == end) {
+        jj--;
+    } else if (pts > timestamp && before) {
+        if (jj > start) {
+            jj--;
+        } else if (ii > 0) {
+            ii--;
+            start = entry->coarse[ii].ref_ep_fine_id;
+            if (ii < entry->num_ep_coarse - 1) {
+                end = entry->coarse[ii + 1].ref_ep_fine_id;
+            } else {
+                end = entry->num_ep_fine;
+            }
+            jj = end - 1;
+        }
+    }
+
+    return (entry->coarse[ii].spn_ep & ~0x1FFFF) + entry->fine[jj].spn_ep;
+}
+
+static uint32_t _open3d_mvc_lookup_dependent_spn(const NAV_CLIP *clip,
+                                                 uint32_t timestamp,
+                                                 uint8_t stc_id)
+{
+    if (!clip || !clip->cl) {
+        return 0;
+    }
+
+    if (clip->cl->cpi_ss.num_stream_pid > 0 && clip->cl->cpi_ss.entry) {
+        return _open3d_clpi_lookup_spn_cpi(clip->cl, &clip->cl->cpi_ss,
+                                           timestamp, 1, stc_id);
+    }
+
+    return clpi_lookup_spn(clip->cl, timestamp, 1, stc_id);
+}
+
+static const MPLS_SUB_PI *_open3d_mvc_get_subplayitem_locked(BLURAY *bd,
+                                                             const BD_OPEN3D_MVC_RUNTIME *mvc,
+                                                             uint8_t *dep_stc_id)
+{
+    const MPLS_SUB *mpls_sub_path;
+
+    if (!bd || !mvc || !bd->title || !bd->title->pl) {
+        return NULL;
+    }
+
+    if (mvc->info.subpath_kind == BD_OPEN3D_MVC_SUBPATH_NORMAL) {
+        if (mvc->info.subpath_index >= bd->title->pl->sub_count) {
+            return NULL;
+        }
+        mpls_sub_path = &bd->title->pl->sub_path[mvc->info.subpath_index];
+    } else if (mvc->info.subpath_kind == BD_OPEN3D_MVC_SUBPATH_EXTENSION) {
+        if (mvc->info.subpath_index >= bd->title->pl->ext_sub_count) {
+            return NULL;
+        }
+        mpls_sub_path = &bd->title->pl->ext_sub_path[mvc->info.subpath_index];
+    } else {
+        return NULL;
+    }
+
+    if (mvc->info.subclip_index >= mpls_sub_path->sub_playitem_count) {
+        return NULL;
+    }
+
+    if (dep_stc_id) {
+        *dep_stc_id = 0;
+        if (mpls_sub_path->sub_play_item[mvc->info.subclip_index].clip &&
+            mpls_sub_path->sub_play_item[mvc->info.subclip_index].clip_count > 0) {
+            *dep_stc_id =
+                mpls_sub_path->sub_play_item[mvc->info.subclip_index].clip[0].stc_id;
+        }
+    }
+
+    return &mpls_sub_path->sub_play_item[mvc->info.subclip_index];
+}
+
+#define OPEN3D_MVC_SEEK_CANDIDATE_MAX_APS 16
+#define OPEN3D_MVC_SEEK_CANDIDATE_MAX_BLOCKS 256
+#define OPEN3D_MVC_SEEK_CANDIDATE_MAX_PES 24
+#define OPEN3D_MVC_SEEK_CANDIDATE_MAX_DELTA 900000
+
+static int _open3d_mvc_probe_base_seek_candidate_locked(BLURAY *bd,
+                                                        const NAV_CLIP *base_clip,
+                                                        uint32_t base_clip_pkt,
+                                                        uint8_t *out_has_idr,
+                                                        uint8_t *out_has_sps,
+                                                        uint8_t *out_has_pps)
+{
+    BD_STREAM probe_st;
+    NAV_CLIP probe_clip;
+    M2TS_DEMUX *probe_demux = NULL;
+    uint8_t block[6144];
+    uint8_t has_idr = 0;
+    uint8_t has_sps = 0;
+    uint8_t has_pps = 0;
+    unsigned pes_seen = 0;
+    unsigned blocks_read = 0;
+    int ok = 0;
+
+    if (out_has_idr) {
+        *out_has_idr = 0;
+    }
+    if (out_has_sps) {
+        *out_has_sps = 0;
+    }
+    if (out_has_pps) {
+        *out_has_pps = 0;
+    }
+
+    if (!bd || !base_clip || !base_clip->cl ||
+        !_open3d_mvc_refresh_runtime_locked(bd) ||
+        !bd->open3d_mvc.info.base_pid) {
+        return 0;
+    }
+
+    memset(&probe_st, 0, sizeof(probe_st));
+    memset(&probe_clip, 0, sizeof(probe_clip));
+    probe_clip = *base_clip;
+    probe_st.clip = &probe_clip;
+
+    if (!_open_m2ts(bd, &probe_st)) {
+        return 0;
+    }
+
+    probe_demux = m2ts_demux_init(bd->open3d_mvc.info.base_pid);
+    if (!probe_demux) {
+        _close_m2ts(&probe_st);
+        return 0;
+    }
+
+    if (_seek_stream(bd, &probe_st, base_clip, base_clip_pkt) < 0) {
+        goto out;
+    }
+
+    while (blocks_read < OPEN3D_MVC_SEEK_CANDIDATE_MAX_BLOCKS &&
+           pes_seen < OPEN3D_MVC_SEEK_CANDIDATE_MAX_PES &&
+           !ok) {
+        PES_BUFFER *base_list;
+        int r = _read_block(bd, &probe_st, block);
+        if (r <= 0) {
+            break;
+        }
+
+        blocks_read++;
+        base_list = m2ts_demux(probe_demux, block);
+        while (base_list) {
+            PES_BUFFER *base = base_list;
+            base_list = base->next;
+            base->next = NULL;
+
+            has_idr |= _open3d_mvc_contains_nal_type(base->buf, base->len, 5) ? 1 : 0;
+            has_sps |= _open3d_mvc_contains_nal_type(base->buf, base->len, 7) ? 1 : 0;
+            has_pps |= _open3d_mvc_contains_nal_type(base->buf, base->len, 8) ? 1 : 0;
+            pes_seen++;
+
+            if (has_idr && has_sps && has_pps) {
+                ok = 1;
+            }
+
+            pes_buffer_free(&base);
+            if (ok || pes_seen >= OPEN3D_MVC_SEEK_CANDIDATE_MAX_PES) {
+                break;
+            }
+        }
+
+        if (base_list) {
+            pes_buffer_free(&base_list);
+        }
+    }
+
+out:
+    if (out_has_idr) {
+        *out_has_idr = has_idr;
+    }
+    if (out_has_sps) {
+        *out_has_sps = has_sps;
+    }
+    if (out_has_pps) {
+        *out_has_pps = has_pps;
+    }
+
+    _open3d_mvc_trace("seek_candidate_probe clip=%s pkt=%u pes=%u blocks=%u"
+                      " idr=%u sps=%u pps=%u ok=%d",
+                      base_clip->name, base_clip_pkt, pes_seen, blocks_read,
+                      has_idr, has_sps, has_pps, ok);
+
+    m2ts_demux_free(&probe_demux);
+    _close_m2ts(&probe_st);
+    return ok;
+}
+
+static uint32_t _open3d_mvc_select_base_seek_candidate_locked(BLURAY *bd,
+                                                              const NAV_CLIP *base_clip,
+                                                              uint32_t base_clip_pkt)
+{
+    uint32_t candidate_pkt;
+    uint32_t first_candidate_time = 0;
+    uint32_t candidate_time = 0;
+    uint32_t next_pkt;
+    uint32_t next_time = 0;
+    int saw_non_idr_restart = 0;
+    unsigned ii;
+
+    if (!bd || !base_clip || !base_clip->cl ||
+        !_open3d_mvc_refresh_runtime_locked(bd) ||
+        !bd->open3d_mvc.info.available) {
+        return base_clip_pkt;
+    }
+
+    candidate_pkt = clpi_access_point(base_clip->cl, base_clip_pkt, 0, 0, &candidate_time);
+    if (candidate_pkt < base_clip->start_pkt) {
+        candidate_pkt = base_clip->start_pkt;
+        candidate_time = base_clip->in_time;
+    }
+    if (candidate_pkt > base_clip->end_pkt) {
+        candidate_pkt = base_clip->end_pkt;
+        candidate_time = base_clip->out_time;
+    }
+    first_candidate_time = candidate_time;
+
+    for (ii = 0; ii < OPEN3D_MVC_SEEK_CANDIDATE_MAX_APS; ii++) {
+        uint8_t has_idr = 0;
+        uint8_t has_sps = 0;
+        uint8_t has_pps = 0;
+
+        if (_open3d_mvc_probe_base_seek_candidate_locked(bd, base_clip, candidate_pkt,
+                                                         &has_idr, &has_sps, &has_pps)) {
+            bd->open3d_mvc.seek_restart_allow_non_idr = 0;
+            if (candidate_pkt != base_clip_pkt) {
+                _open3d_mvc_trace("seek_candidate_select clip=%s requested_pkt=%u"
+                                  " selected_pkt=%u selected_time=%u step=%u",
+                                  base_clip->name, base_clip_pkt,
+                                  candidate_pkt, candidate_time, ii);
+            }
+            return candidate_pkt;
+        }
+        if (!has_idr && has_sps && has_pps) {
+            saw_non_idr_restart = 1;
+        }
+
+        next_pkt = clpi_access_point(base_clip->cl, candidate_pkt + 1, 1, 0, &next_time);
+        if (next_pkt <= candidate_pkt || next_pkt > base_clip->end_pkt) {
+            break;
+        }
+        if (next_time > first_candidate_time &&
+            next_time - first_candidate_time > OPEN3D_MVC_SEEK_CANDIDATE_MAX_DELTA) {
+            break;
+        }
+
+        _open3d_mvc_trace("seek_candidate_skip clip=%s requested_pkt=%u"
+                          " candidate_pkt=%u candidate_time=%u next_pkt=%u next_time=%u"
+                          " step=%u",
+                          base_clip->name, base_clip_pkt,
+                          candidate_pkt, candidate_time,
+                          next_pkt, next_time, ii);
+        candidate_pkt = next_pkt;
+        candidate_time = next_time;
+    }
+
+    bd->open3d_mvc.seek_restart_allow_non_idr = saw_non_idr_restart ? 1 : 0;
+    if (saw_non_idr_restart) {
+        _open3d_mvc_trace("seek_candidate_non_idr_fallback clip=%s requested_pkt=%u",
+                          base_clip->name, base_clip_pkt);
+    }
+
+    return base_clip_pkt;
+}
+
+static void _open3d_mvc_prepare_dep_seek_locked(BLURAY *bd,
+                                                const NAV_CLIP *base_clip,
+                                                uint32_t base_clip_pkt)
+{
+    BD_OPEN3D_MVC_RUNTIME *mvc;
+    const MPLS_SUB_PI *dep_spi;
+    uint8_t dep_stc_id = 0;
+    uint32_t base_time = 0;
+    uint32_t dep_tick;
+    uint32_t dep_pkt;
+
+    if (!bd || !base_clip || !base_clip->cl) {
+        return;
+    }
+
+    if (!_open3d_mvc_refresh_runtime_locked(bd)) {
+        return;
+    }
+
+    mvc = &bd->open3d_mvc;
+    if (!mvc->info.available || !mvc->dependent_clip || !mvc->dependent_clip->cl) {
+        return;
+    }
+
+    dep_spi = _open3d_mvc_get_subplayitem_locked(bd, mvc, &dep_stc_id);
+    if (!dep_spi) {
+        return;
+    }
+
+    dep_tick = dep_spi->in_time;
+    dep_pkt = mvc->dependent_clip->start_pkt;
+
+    if (clpi_access_point(base_clip->cl, base_clip_pkt, 0, 0, &base_time) <
+        base_clip->cl->clip.num_source_packets) {
+        if (base_time >= dep_spi->sync_pts) {
+            uint32_t delta = base_time - dep_spi->sync_pts;
+            if (delta > dep_spi->out_time - dep_spi->in_time) {
+                dep_tick = dep_spi->out_time;
+            } else {
+                dep_tick = dep_spi->in_time + delta;
+            }
+        }
+
+        if (dep_tick < dep_spi->in_time) {
+            dep_tick = dep_spi->in_time;
+        }
+        if (dep_tick > dep_spi->out_time) {
+            dep_tick = dep_spi->out_time;
+        }
+
+        dep_pkt = _open3d_mvc_lookup_dependent_spn(mvc->dependent_clip,
+                                                   dep_tick, dep_stc_id);
+        if (dep_pkt < mvc->dependent_clip->start_pkt) {
+            dep_pkt = mvc->dependent_clip->start_pkt;
+        }
+        if (dep_pkt > mvc->dependent_clip->end_pkt) {
+            dep_pkt = mvc->dependent_clip->end_pkt;
+        }
+    }
+
+    mvc->dep_seek_pkt = dep_pkt;
+    mvc->dep_seek_time = dep_tick;
+    mvc->dep_seek_pending = 1;
+    mvc->seek_restart_pending = 1;
+    _open3d_mvc_trace("dep_seek_prepare base_clip=%s base_pkt=%u base_time=%u"
+                      " dep_clip=%s dep_pkt=%u dep_time=%u sync_pts=%u dep_stc_id=%u",
+                      base_clip->name, base_clip_pkt, base_time,
+                      mvc->dependent_clip->name, dep_pkt, dep_tick,
+                      dep_spi->sync_pts, dep_stc_id);
+}
+
+#define OPEN3D_MVC_DEP_FILL_BLOCKS 256
+#define OPEN3D_MVC_DEP_EMPTY_FILL_BLOCKS 1024
+#define OPEN3D_MVC_RELAXED_CLOCK_WINDOW 4500
+#define OPEN3D_MVC_STARTUP_RELAXED_PTS_WINDOW 4500
+#define OPEN3D_MVC_WEAK_RELOCK_GAP 45000
+#define OPEN3D_MVC_INITIAL_BASE_ONLY_WARMUP_AUS 1
+#define OPEN3D_MVC_STARTUP_EXACT_RUNWAY 2
+#define OPEN3D_MVC_SEEK_STARTUP_EXACT_RUNWAY 4
+#define OPEN3D_MVC_RELOCK_EXACT_RUNWAY 3
+#define OPEN3D_MVC_SAFE_RELAXED_FOLLOW_WINDOW 120000
+#define OPEN3D_MVC_INVALID_TS ((int64_t)-1)
+
+static int _open3d_mvc_trace_enabled(void)
+{
+    static int trace_enabled = -1;
+
+    if (trace_enabled < 0) {
+        const char *env = getenv("OPEN3D_LIBBLURAY_MVC_TRACE");
+        trace_enabled = (env && env[0] && strcmp(env, "0")) ? 1 : 0;
+    }
+
+    return trace_enabled;
+}
+
+static int _open3d_mvc_trace_pes_enabled(void)
+{
+    static int trace_enabled = -1;
+
+    if (trace_enabled < 0) {
+        const char *env = getenv("OPEN3D_LIBBLURAY_MVC_TRACE_PES");
+        trace_enabled = (env && env[0] && strcmp(env, "0")) ? 1 : 0;
+    }
+
+    return trace_enabled;
+}
+
+static int _open3d_mvc_trace_pes_seq_enabled(void)
+{
+    static int trace_enabled = -1;
+
+    if (trace_enabled < 0) {
+        const char *env = getenv("OPEN3D_LIBBLURAY_MVC_TRACE_PES_SEQ");
+        trace_enabled = (env && env[0] && strcmp(env, "0")) ? 1 : 0;
+    }
+
+    return trace_enabled;
+}
+
+static int64_t _open3d_mvc_trace_min_time(void)
+{
+    static int initialized = 0;
+    static int64_t min_time = 0;
+
+    if (!initialized) {
+        const char *env = getenv("OPEN3D_LIBBLURAY_MVC_TRACE_MIN_TIME");
+        if (env && env[0]) {
+            min_time = strtoll(env, NULL, 10);
+        }
+        initialized = 1;
+    }
+
+    return min_time;
+}
+
+static void _open3d_mvc_trace(const char *fmt, ...)
+{
+    va_list ap;
+
+    if (!_open3d_mvc_trace_enabled()) {
+        return;
+    }
+
+    fprintf(stderr, "open3d_libbluray_mvc: ");
+    va_start(ap, fmt);
+    vfprintf(stderr, fmt, ap);
+    va_end(ap);
+    fputc('\n', stderr);
+}
+
+static void _open3d_mvc_format_nal_seq(const uint8_t *buf, uint32_t len,
+                                       char *dst, size_t dst_size)
+{
+    uint32_t ii = 0;
+    size_t used = 0;
+    int first = 1;
+
+    if (!dst || !dst_size) {
+        return;
+    }
+
+    dst[0] = '\0';
+    if (!buf || len < 4) {
+        return;
+    }
+
+    while (ii + 3 < len && used + 8 < dst_size) {
+        uint32_t sc = 0;
+        uint32_t payload;
+        uint8_t nal_type;
+        int wrote;
+
+        if (buf[ii] == 0x00 && buf[ii + 1] == 0x00) {
+            if (buf[ii + 2] == 0x01) {
+                sc = 3;
+            } else if (ii + 3 < len &&
+                       buf[ii + 2] == 0x00 && buf[ii + 3] == 0x01) {
+                sc = 4;
+            }
+        }
+        if (!sc) {
+            ii++;
+            continue;
+        }
+
+        payload = ii + sc;
+        if (payload >= len) {
+            break;
+        }
+
+        nal_type = buf[payload] & 0x1f;
+        wrote = snprintf(dst + used, dst_size - used, "%s%u@%u",
+                         first ? "" : ",", nal_type, ii);
+        if (wrote < 0 || (size_t)wrote >= dst_size - used) {
+            used = dst_size - 1;
+            break;
+        }
+
+        used += (size_t)wrote;
+        first = 0;
+        ii = payload + 1;
+    }
+
+    dst[used] = '\0';
+}
+
+static int64_t _open3d_mvc_pes_time(const PES_BUFFER *pes)
+{
+    if (!pes) {
+        return OPEN3D_MVC_INVALID_TS;
+    }
+
+    if (pes->dts > 0) {
+        return pes->dts;
+    }
+    if (pes->pts > 0) {
+        return pes->pts;
+    }
+
+    return OPEN3D_MVC_INVALID_TS;
+}
+
+static int64_t _open3d_mvc_pes_emit_time(const PES_BUFFER *pes)
+{
+    if (!pes) {
+        return OPEN3D_MVC_INVALID_TS;
+    }
+
+    if (pes->pts > 0) {
+        return pes->pts;
+    }
+
+    return _open3d_mvc_pes_time(pes);
+}
+
+static int64_t _open3d_mvc_abs64(int64_t value)
+{
+    return value < 0 ? -value : value;
+}
+
+static int _open3d_mvc_nal_type_is_vcl(uint8_t nal_type)
+{
+    return nal_type >= 1 && nal_type <= 5;
+}
+
+static int _open3d_mvc_find_first_nal_type_offset(const uint8_t *buf, uint32_t len,
+                                                  uint8_t target_type, uint32_t *out_off)
+{
+    uint32_t ii = 0;
+
+    if (!buf || len < 4 || !out_off) {
+        return 0;
+    }
+
+    while (ii + 3 < len) {
+        uint32_t sc_len = 0;
+        uint32_t payload;
+
+        if (buf[ii] == 0x00 && buf[ii + 1] == 0x00 && buf[ii + 2] == 0x01) {
+            sc_len = 3;
+        } else if (ii + 4 < len &&
+                   buf[ii] == 0x00 && buf[ii + 1] == 0x00 &&
+                   buf[ii + 2] == 0x00 && buf[ii + 3] == 0x01) {
+            sc_len = 4;
+        }
+
+        if (!sc_len) {
+            ii++;
+            continue;
+        }
+
+        payload = ii + sc_len;
+        if (payload >= len) {
+            break;
+        }
+
+        if ((buf[payload] & 0x1f) == target_type) {
+            *out_off = ii;
+            return 1;
+        }
+
+        ii = payload;
+    }
+
+    return 0;
+}
+
+static int _open3d_mvc_find_first_start_code_offset(const uint8_t *buf, uint32_t len,
+                                                    uint32_t *out_off)
+{
+    uint32_t ii;
+
+    if (!buf || len < 4 || !out_off) {
+        return 0;
+    }
+
+    for (ii = 0; ii + 3 < len; ii++) {
+        if (buf[ii] == 0x00 && buf[ii + 1] == 0x00) {
+            if (buf[ii + 2] == 0x01) {
+                *out_off = ii;
+                return 1;
+            }
+            if (ii + 3 < len &&
+                buf[ii + 2] == 0x00 && buf[ii + 3] == 0x01) {
+                *out_off = ii;
+                return 1;
+            }
+        }
+    }
+
+    return 0;
+}
+
+static int _open3d_mvc_contains_nal_type(const uint8_t *buf, uint32_t len,
+                                         uint8_t target_type)
+{
+    uint32_t off = 0;
+    return _open3d_mvc_find_first_nal_type_offset(buf, len, target_type, &off);
+}
+
+static int _open3d_mvc_dep_prefix_nal_allowed(uint8_t nal_type)
+{
+    switch (nal_type) {
+        case 6:
+        case 8:
+        case 9:
+        case 14:
+        case 15:
+        case 24:
+            return 1;
+        default:
+            return 0;
+    }
+}
+
+static int _open3d_mvc_dep_startup_ctx_nal_allowed(uint8_t nal_type)
+{
+    switch (nal_type) {
+        case 6:
+        case 8:
+        case 14:
+        case 15:
+            return 1;
+        default:
+            return 0;
+    }
+}
+
+static int _open3d_mvc_base_startup_ctx_nal_allowed(uint8_t nal_type)
+{
+    switch (nal_type) {
+        case 6:
+        case 7:
+        case 8:
+        case 9:
+            return 1;
+        default:
+            return 0;
+    }
+}
+
+static void _open3d_mvc_cache_base_startup_prefix(BD_OPEN3D_MVC_RUNTIME *mvc,
+                                                  const PES_BUFFER *base)
+{
+    uint32_t type5_off = 0;
+    uint32_t total = 0;
+    uint32_t ii;
+    uint8_t *buf;
+    uint32_t off = 0;
+
+    if (!mvc || !base || mvc->startup_base_prefix || base->len < 4) {
+        return;
+    }
+
+    if (!_open3d_mvc_contains_nal_type(base->buf, base->len, 7) ||
+        !_open3d_mvc_contains_nal_type(base->buf, base->len, 8) ||
+        !_open3d_mvc_find_first_nal_type_offset(base->buf, base->len, 5, &type5_off) ||
+        type5_off >= base->len) {
+        return;
+    }
+
+    for (ii = 0; ii + 3 < type5_off; ) {
+        uint32_t sc_len = 0;
+        uint32_t payload;
+        uint32_t next = base->len;
+        uint8_t nal_type;
+
+        if (base->buf[ii] == 0x00 && base->buf[ii + 1] == 0x00 &&
+            base->buf[ii + 2] == 0x01) {
+            sc_len = 3;
+        } else if (ii + 4 < type5_off &&
+                   base->buf[ii] == 0x00 && base->buf[ii + 1] == 0x00 &&
+                   base->buf[ii + 2] == 0x00 && base->buf[ii + 3] == 0x01) {
+            sc_len = 4;
+        }
+        if (!sc_len) {
+            ii++;
+            continue;
+        }
+
+        payload = ii + sc_len;
+        if (payload >= type5_off) {
+            break;
+        }
+        for (next = payload; next + 3 < type5_off; ++next) {
+            if (base->buf[next] == 0x00 && base->buf[next + 1] == 0x00 &&
+                (base->buf[next + 2] == 0x01 ||
+                 (next + 3 < type5_off &&
+                  base->buf[next + 2] == 0x00 &&
+                  base->buf[next + 3] == 0x01))) {
+                break;
+            }
+        }
+
+        nal_type = base->buf[payload] & 0x1f;
+        if (_open3d_mvc_base_startup_ctx_nal_allowed(nal_type)) {
+            total += (next - ii);
+        }
+        ii = payload + 1;
+    }
+
+    if (!total) {
+        return;
+    }
+
+    buf = malloc(total);
+    if (!buf) {
+        return;
+    }
+
+    for (ii = 0; ii + 3 < type5_off; ) {
+        uint32_t sc_len = 0;
+        uint32_t payload;
+        uint32_t next = base->len;
+        uint8_t nal_type;
+
+        if (base->buf[ii] == 0x00 && base->buf[ii + 1] == 0x00 &&
+            base->buf[ii + 2] == 0x01) {
+            sc_len = 3;
+        } else if (ii + 4 < type5_off &&
+                   base->buf[ii] == 0x00 && base->buf[ii + 1] == 0x00 &&
+                   base->buf[ii + 2] == 0x00 && base->buf[ii + 3] == 0x01) {
+            sc_len = 4;
+        }
+        if (!sc_len) {
+            ii++;
+            continue;
+        }
+
+        payload = ii + sc_len;
+        if (payload >= type5_off) {
+            break;
+        }
+        for (next = payload; next + 3 < type5_off; ++next) {
+            if (base->buf[next] == 0x00 && base->buf[next + 1] == 0x00 &&
+                (base->buf[next + 2] == 0x01 ||
+                 (next + 3 < type5_off &&
+                  base->buf[next + 2] == 0x00 &&
+                  base->buf[next + 3] == 0x01))) {
+                break;
+            }
+        }
+
+        nal_type = base->buf[payload] & 0x1f;
+        if (_open3d_mvc_base_startup_ctx_nal_allowed(nal_type)) {
+            memcpy(buf + off, base->buf + ii, next - ii);
+            off += (next - ii);
+        }
+        ii = payload + 1;
+    }
+
+    mvc->startup_base_prefix = buf;
+    mvc->startup_base_prefix_len = off;
+    _open3d_mvc_trace("cache_base_startup_prefix pts=%" PRId64
+                      " dts=%" PRId64 " len=%u",
+                      base->pts, base->dts, off);
+}
+
+static void _open3d_mvc_cache_dep_startup_prefix(BD_OPEN3D_MVC_RUNTIME *mvc,
+                                                 const PES_BUFFER *dep)
+{
+    uint32_t type20_off = 0;
+    uint32_t total = 0;
+    uint32_t ii;
+    uint8_t *buf;
+    uint32_t off = 0;
+
+    if (!mvc || !dep || mvc->startup_dep_prefix || dep->len < 4) {
+        return;
+    }
+
+    if (!_open3d_mvc_contains_nal_type(dep->buf, dep->len, 15) ||
+        !_open3d_mvc_find_first_nal_type_offset(dep->buf, dep->len, 20, &type20_off) ||
+        type20_off >= dep->len) {
+        return;
+    }
+
+    for (ii = 0; ii + 3 < type20_off; ) {
+        uint32_t sc_len = 0;
+        uint32_t payload;
+        uint32_t next = dep->len;
+        uint8_t nal_type;
+
+        if (dep->buf[ii] == 0x00 && dep->buf[ii + 1] == 0x00 &&
+            dep->buf[ii + 2] == 0x01) {
+            sc_len = 3;
+        } else if (ii + 4 < type20_off &&
+                   dep->buf[ii] == 0x00 && dep->buf[ii + 1] == 0x00 &&
+                   dep->buf[ii + 2] == 0x00 && dep->buf[ii + 3] == 0x01) {
+            sc_len = 4;
+        }
+        if (!sc_len) {
+            ii++;
+            continue;
+        }
+
+        payload = ii + sc_len;
+        if (payload >= type20_off) {
+            break;
+        }
+        for (next = payload; next + 3 < type20_off; ++next) {
+            if (dep->buf[next] == 0x00 && dep->buf[next + 1] == 0x00 &&
+                (dep->buf[next + 2] == 0x01 ||
+                 (next + 3 < type20_off &&
+                  dep->buf[next + 2] == 0x00 &&
+                  dep->buf[next + 3] == 0x01))) {
+                break;
+            }
+        }
+
+        nal_type = dep->buf[payload] & 0x1f;
+        if (_open3d_mvc_dep_startup_ctx_nal_allowed(nal_type)) {
+            total += (next - ii);
+        }
+        ii = payload + 1;
+    }
+
+    if (!total) {
+        return;
+    }
+
+    buf = malloc(total);
+    if (!buf) {
+        return;
+    }
+
+    for (ii = 0; ii + 3 < type20_off; ) {
+        uint32_t sc_len = 0;
+        uint32_t payload;
+        uint32_t next = dep->len;
+        uint8_t nal_type;
+
+        if (dep->buf[ii] == 0x00 && dep->buf[ii + 1] == 0x00 &&
+            dep->buf[ii + 2] == 0x01) {
+            sc_len = 3;
+        } else if (ii + 4 < type20_off &&
+                   dep->buf[ii] == 0x00 && dep->buf[ii + 1] == 0x00 &&
+                   dep->buf[ii + 2] == 0x00 && dep->buf[ii + 3] == 0x01) {
+            sc_len = 4;
+        }
+        if (!sc_len) {
+            ii++;
+            continue;
+        }
+
+        payload = ii + sc_len;
+        if (payload >= type20_off) {
+            break;
+        }
+        for (next = payload; next + 3 < type20_off; ++next) {
+            if (dep->buf[next] == 0x00 && dep->buf[next + 1] == 0x00 &&
+                (dep->buf[next + 2] == 0x01 ||
+                 (next + 3 < type20_off &&
+                  dep->buf[next + 2] == 0x00 &&
+                  dep->buf[next + 3] == 0x01))) {
+                break;
+            }
+        }
+
+        nal_type = dep->buf[payload] & 0x1f;
+        if (_open3d_mvc_dep_startup_ctx_nal_allowed(nal_type)) {
+            memcpy(buf + off, dep->buf + ii, next - ii);
+            off += (next - ii);
+        }
+        ii = payload + 1;
+    }
+
+    mvc->startup_dep_prefix = buf;
+    mvc->startup_dep_prefix_len = off;
+    _open3d_mvc_trace("cache_dep_startup_prefix pts=%" PRId64
+                      " dts=%" PRId64 " len=%u",
+                      dep->pts, dep->dts, off);
+}
+
+static int _open3d_mvc_find_leading_sync_offset(const uint8_t *buf, uint32_t len,
+                                                uint32_t *out_off)
+{
+    uint32_t nal_offs[128];
+    uint8_t nal_types[128];
+    uint32_t nal_count = 0;
+    uint32_t ii = 0;
+    const uint32_t window = 64;
+    uint32_t nn;
+
+    if (!buf || len < 4 || !out_off) {
+        return 0;
+    }
+
+    while (ii + 3 < len && nal_count < (sizeof(nal_offs) / sizeof(nal_offs[0]))) {
+        uint32_t sc_len = 0;
+        uint32_t payload;
+
+        if (buf[ii] == 0x00 && buf[ii + 1] == 0x00 && buf[ii + 2] == 0x01) {
+            sc_len = 3;
+        } else if (ii + 4 < len &&
+                   buf[ii] == 0x00 && buf[ii + 1] == 0x00 &&
+                   buf[ii + 2] == 0x00 && buf[ii + 3] == 0x01) {
+            sc_len = 4;
+        }
+
+        if (!sc_len) {
+            ii++;
+            continue;
+        }
+
+        payload = ii + sc_len;
+        if (payload >= len) {
+            break;
+        }
+
+        nal_offs[nal_count] = ii;
+        nal_types[nal_count] = buf[payload] & 0x1f;
+        nal_count++;
+        ii = payload;
+    }
+
+    if (!nal_count) {
+        return 0;
+    }
+
+    if (nal_types[0] == 7 || nal_types[0] == 9) {
+        *out_off = nal_offs[0];
+        return 1;
+    }
+
+    for (nn = 0; nn < nal_count; nn++) {
+        uint32_t jj;
+        uint32_t hi;
+        int has_pps = 0;
+        int has_vcl = 0;
+
+        if (nal_types[nn] != 7 && nal_types[nn] != 9) {
+            continue;
+        }
+
+        hi = (nn + window < nal_count) ? (nn + window) : nal_count;
+        for (jj = nn; jj < hi; jj++) {
+            has_pps |= nal_types[jj] == 8;
+            has_vcl |= _open3d_mvc_nal_type_is_vcl(nal_types[jj]);
+            if (has_pps && has_vcl) {
+                *out_off = nal_offs[nn];
+                return 1;
+            }
+        }
+    }
+
+    for (nn = 0; nn < nal_count; nn++) {
+        if (nal_types[nn] == 7) {
+            *out_off = nal_offs[nn];
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
+static int _open3d_mvc_find_dep_context_offset(const uint8_t *buf, uint32_t len,
+                                               int strict_start,
+                                               uint32_t *out_off)
+{
+    uint32_t start_off = 0;
+    uint32_t type20_off = 0;
+    uint32_t ii = 0;
+    int saw_prefix = 0;
+
+    if (!buf || !out_off || len < 4) {
+        return 0;
+    }
+
+    if (!_open3d_mvc_find_first_start_code_offset(buf, len, &start_off) ||
+        start_off >= len) {
+        return 0;
+    }
+
+    if (_open3d_mvc_find_first_nal_type_offset(buf, len, 20, &type20_off) &&
+        type20_off < len && type20_off >= start_off) {
+        for (ii = start_off; ii + 3 < type20_off; ) {
+            uint32_t sc_len = 0;
+            uint32_t payload;
+            uint8_t nal_type;
+
+            if (buf[ii] == 0x00 && buf[ii + 1] == 0x00 && buf[ii + 2] == 0x01) {
+                sc_len = 3;
+            } else if (ii + 4 < type20_off &&
+                       buf[ii] == 0x00 && buf[ii + 1] == 0x00 &&
+                       buf[ii + 2] == 0x00 && buf[ii + 3] == 0x01) {
+                sc_len = 4;
+            }
+
+            if (!sc_len) {
+                ii++;
+                continue;
+            }
+
+            payload = ii + sc_len;
+            if (payload >= type20_off) {
+                break;
+            }
+
+            nal_type = buf[payload] & 0x1f;
+            if (!_open3d_mvc_dep_prefix_nal_allowed(nal_type)) {
+                saw_prefix = 0;
+                break;
+            }
+
+            saw_prefix = 1;
+            ii = payload + 1;
+        }
+
+        if (saw_prefix) {
+            *out_off = start_off;
+            return 1;
+        }
+
+        if (strict_start) {
+            *out_off = type20_off;
+            return 1;
+        }
+    }
+
+    if (_open3d_mvc_find_leading_sync_offset(buf, len, out_off) &&
+        *out_off < len) {
+        return 1;
+    }
+    if (_open3d_mvc_find_first_nal_type_offset(buf, len, 6, out_off) &&
+        *out_off < len) {
+        return 1;
+    }
+    if (_open3d_mvc_find_first_nal_type_offset(buf, len, 20, out_off) &&
+        *out_off < len) {
+        return 1;
+    }
+
+    *out_off = start_off;
+    return 1;
+}
+
+static int _open3d_mvc_find_initial_dep_exact_offset(const uint8_t *buf, uint32_t len,
+                                                     uint32_t *out_off)
+{
+    uint32_t type20_off = 0;
+    uint32_t ii = 0;
+    int saw_subset15 = 0;
+
+    if (!buf || len < 4 || !out_off) {
+        return 0;
+    }
+
+    if (!_open3d_mvc_find_first_nal_type_offset(buf, len, 20, &type20_off) ||
+        type20_off >= len) {
+        return 0;
+    }
+
+    while (ii + 3 < type20_off) {
+        uint32_t sc_len = 0;
+        uint32_t payload;
+        uint8_t nal_type;
+
+        if (buf[ii] == 0x00 && buf[ii + 1] == 0x00 && buf[ii + 2] == 0x01) {
+            sc_len = 3;
+        } else if (ii + 4 < type20_off &&
+                   buf[ii] == 0x00 && buf[ii + 1] == 0x00 &&
+                   buf[ii + 2] == 0x00 && buf[ii + 3] == 0x01) {
+            sc_len = 4;
+        }
+
+        if (!sc_len) {
+            ii++;
+            continue;
+        }
+
+        payload = ii + sc_len;
+        if (payload >= type20_off) {
+            break;
+        }
+
+        nal_type = buf[payload] & 0x1f;
+        if (nal_type == 15) {
+            saw_subset15 = 1;
+        } else if (saw_subset15 && nal_type == 6) {
+            *out_off = ii;
+            return 1;
+        }
+
+        ii = payload + 1;
+    }
+
+    return 0;
+}
+
+static int _open3d_mvc_prepare_match_offsets(const BD_OPEN3D_MVC_RUNTIME *mvc,
+                                             const PES_BUFFER *base,
+                                             const PES_BUFFER *dep,
+                                             int initial_start,
+                                             int relock_start,
+                                             int hard_relock_start,
+                                             uint32_t *base_off,
+                                             uint32_t *dep_off)
+{
+    uint32_t dep_candidate = 0;
+    uint32_t local_base_off = 0;
+    uint32_t local_dep_off = 0;
+    uint32_t base_type5_off = 0;
+    uint32_t type20_off = 0;
+    uint32_t initial_dep_trim_off = 0;
+    int base_has_idr = 0;
+    int base_has_sps = 0;
+    int base_has_pps = 0;
+    int allow_seek_non_idr = 0;
+    int can_use_cached_base_prefix = 0;
+    int dep_has_subset15 = 0;
+    int can_use_cached_dep_prefix = 0;
+    int initial_exact_start = initial_start && mvc->initial_base_only_aus == 0;
+
+    if (!mvc || !base || !dep || !base_off || !dep_off) {
+        return 0;
+    }
+
+    if (!_open3d_mvc_find_leading_sync_offset(base->buf, base->len, &local_base_off) ||
+        local_base_off >= base->len) {
+        return 0;
+    }
+
+    if (initial_start || hard_relock_start) {
+        allow_seek_non_idr =
+            initial_start &&
+            mvc->seek_restart_pending &&
+            mvc->seek_restart_allow_non_idr;
+        base_has_idr =
+            _open3d_mvc_contains_nal_type(base->buf + local_base_off,
+                                          base->len - local_base_off, 5);
+        base_has_sps =
+            _open3d_mvc_contains_nal_type(base->buf + local_base_off,
+                                          base->len - local_base_off, 7);
+        base_has_pps =
+            _open3d_mvc_contains_nal_type(base->buf + local_base_off,
+                                          base->len - local_base_off, 8);
+        can_use_cached_base_prefix =
+            base_has_idr && !base_has_sps && !base_has_pps &&
+            mvc->startup_base_prefix &&
+            mvc->startup_base_prefix_len > 0 &&
+            !mvc->startup_base_prefix_used &&
+            _open3d_mvc_find_first_nal_type_offset(base->buf + local_base_off,
+                                                   base->len - local_base_off,
+                                                   5, &base_type5_off);
+        if ((!base_has_idr && !allow_seek_non_idr) ||
+            ((!base_has_sps || !base_has_pps) && !can_use_cached_base_prefix)) {
+            return 0;
+        }
+
+        if (can_use_cached_base_prefix) {
+            local_base_off += base_type5_off;
+        }
+
+        if (!_open3d_mvc_find_dep_context_offset(dep->buf, dep->len, 1, &dep_candidate) ||
+            dep_candidate >= dep->len ||
+            !_open3d_mvc_find_first_nal_type_offset(dep->buf + dep_candidate,
+                                                    dep->len - dep_candidate,
+                                                    20, &type20_off)) {
+            return 0;
+        }
+
+        dep_has_subset15 =
+            _open3d_mvc_contains_nal_type(dep->buf + dep_candidate,
+                                          dep->len - dep_candidate, 15);
+        can_use_cached_dep_prefix =
+            !dep_has_subset15 &&
+            mvc->startup_dep_prefix &&
+            mvc->startup_dep_prefix_len > 0 &&
+            !mvc->startup_dep_prefix_used;
+        if (!dep_has_subset15 && !can_use_cached_dep_prefix) {
+            return 0;
+        }
+
+        if (initial_exact_start &&
+            dep_has_subset15 &&
+            _open3d_mvc_find_initial_dep_exact_offset(dep->buf + dep_candidate,
+                                                      dep->len - dep_candidate,
+                                                      &initial_dep_trim_off)) {
+            local_dep_off = dep_candidate + initial_dep_trim_off;
+        } else {
+            local_dep_off = dep_has_subset15 ? dep_candidate
+                                             : (dep_candidate + type20_off);
+        }
+    } else if (relock_start) {
+        if (!_open3d_mvc_find_dep_context_offset(dep->buf, dep->len, 1, &dep_candidate) ||
+            dep_candidate >= dep->len ||
+            !_open3d_mvc_contains_nal_type(dep->buf + dep_candidate,
+                                           dep->len - dep_candidate, 20)) {
+            return 0;
+        }
+
+        local_dep_off = dep_candidate;
+    } else if (_open3d_mvc_find_dep_context_offset(dep->buf, dep->len, 0, &dep_candidate) &&
+               dep_candidate < dep->len) {
+        local_dep_off = dep_candidate;
+    }
+
+    if (local_dep_off >= dep->len) {
+        return 0;
+    }
+
+    *base_off = local_base_off;
+    *dep_off = local_dep_off;
+    return 1;
+}
+
+static int _open3d_mvc_relaxed_window_match(const PES_BUFFER *base,
+                                            const PES_BUFFER *dep)
+{
+    int64_t base_pts;
+    int64_t dep_pts;
+
+    if (!base || !dep) {
+        return 0;
+    }
+
+    base_pts = base->pts > 0 ? base->pts : OPEN3D_MVC_INVALID_TS;
+    dep_pts = dep->pts > 0 ? dep->pts : OPEN3D_MVC_INVALID_TS;
+
+    if (base->dts <= 0 && base->pts > 0 && dep->dts > 0) {
+        if (_open3d_mvc_abs64(base->pts - dep->dts) > OPEN3D_MVC_RELAXED_CLOCK_WINDOW) {
+            return 0;
+        }
+        if (dep_pts > 0 &&
+            _open3d_mvc_abs64(base_pts - dep_pts) > OPEN3D_MVC_RELAXED_CLOCK_WINDOW) {
+            return 0;
+        }
+        return 1;
+    }
+
+    if (dep->dts <= 0 && dep->pts > 0 && base->dts > 0) {
+        if (_open3d_mvc_abs64(dep->pts - base->dts) > OPEN3D_MVC_RELAXED_CLOCK_WINDOW) {
+            return 0;
+        }
+        if (base_pts > 0 &&
+            _open3d_mvc_abs64(dep_pts - base_pts) > OPEN3D_MVC_RELAXED_CLOCK_WINDOW) {
+            return 0;
+        }
+        return 1;
+    }
+
+    return 0;
+}
+
+static int _open3d_mvc_dep_candidate_ready(const PES_BUFFER *base,
+                                           const PES_BUFFER *dep)
+{
+    int64_t base_time;
+    int64_t dep_time;
+
+    if (!base || !dep) {
+        return 0;
+    }
+
+    if (_open3d_mvc_relaxed_window_match(base, dep)) {
+        return 1;
+    }
+
+    base_time = _open3d_mvc_pes_time(base);
+    dep_time = _open3d_mvc_pes_time(dep);
+
+    if (base_time <= 0 || dep_time <= 0 || dep_time >= base_time) {
+        return 1;
+    }
+
+    return 0;
+}
+
+static void _open3d_mvc_trace_pes(const char *kind, const PES_BUFFER *pes)
+{
+    unsigned aud_count = 0;
+    unsigned sei_count = 0;
+    unsigned slice1_count = 0;
+    unsigned slice20_count = 0;
+    unsigned subset15_count = 0;
+    unsigned prefix14_count = 0;
+    unsigned type24_count = 0;
+    unsigned nal_count = 0;
+    const uint8_t *buf;
+    uint32_t len;
+    int64_t time;
+    int64_t min_time;
+    char seq_buf[1024];
+
+    if (!_open3d_mvc_trace_pes_enabled() || !kind || !pes) {
+        return;
+    }
+
+    time = _open3d_mvc_pes_time(pes);
+    min_time = _open3d_mvc_trace_min_time();
+    if (min_time > 0 && time > 0 && time < min_time) {
+        return;
+    }
+
+    buf = pes->buf;
+    len = pes->len;
+    if (buf && len > 4) {
+        uint32_t ii = 0;
+        while (ii + 3 < len) {
+            uint32_t sc = 0;
+            uint8_t nal_type;
+            if (buf[ii] == 0x00 && buf[ii + 1] == 0x00) {
+                if (buf[ii + 2] == 0x01) {
+                    sc = 3;
+                } else if (ii + 3 < len && buf[ii + 2] == 0x00 && buf[ii + 3] == 0x01) {
+                    sc = 4;
+                }
+            }
+            if (!sc) {
+                ii++;
+                continue;
+            }
+            if (ii + sc >= len) {
+                break;
+            }
+
+            nal_type = buf[ii + sc] & 0x1f;
+            nal_count++;
+            switch (nal_type) {
+                case 1:
+                    slice1_count++;
+                    break;
+                case 6:
+                    sei_count++;
+                    break;
+                case 9:
+                    aud_count++;
+                    break;
+                case 14:
+                    prefix14_count++;
+                    break;
+                case 15:
+                    subset15_count++;
+                    break;
+                case 20:
+                    slice20_count++;
+                    break;
+                case 24:
+                    type24_count++;
+                    break;
+                default:
+                    break;
+            }
+            ii += sc;
+        }
+    }
+
+    _open3d_mvc_trace("%s pts=%" PRId64 " dts=%" PRId64
+                      " time=%" PRId64 " len=%u nals=%u aud=%u sei=%u"
+                      " slice1=%u prefix14=%u subset15=%u slice20=%u type24=%u",
+                      kind, pes->pts, pes->dts, time, pes->len,
+                      nal_count, aud_count, sei_count,
+                      slice1_count, prefix14_count, subset15_count,
+                      slice20_count, type24_count);
+
+    if (_open3d_mvc_trace_pes_seq_enabled()) {
+        _open3d_mvc_format_nal_seq(buf, len, seq_buf, sizeof(seq_buf));
+        _open3d_mvc_trace("%s_seq pts=%" PRId64 " dts=%" PRId64
+                          " time=%" PRId64 " seq=[%s]",
+                          kind, pes->pts, pes->dts, time, seq_buf);
+    }
+}
+
+static uint32_t _open3d_mvc_match_flags(const PES_BUFFER *base,
+                                        const PES_BUFFER *dep)
+{
+    int64_t base_time;
+    int64_t dep_time;
+
+    if (!base || !dep) {
+        return BD_OPEN3D_MVC_UNIT_FLAG_NONE;
+    }
+
+    base_time = _open3d_mvc_pes_time(base);
+    dep_time = _open3d_mvc_pes_time(dep);
+
+    if (base_time > 0 && dep_time > 0) {
+        if (_open3d_mvc_relaxed_window_match(base, dep)) {
+            return BD_OPEN3D_MVC_UNIT_FLAG_MATCHED | BD_OPEN3D_MVC_UNIT_FLAG_RELAXED_DTS;
+        }
+
+        if (base_time != dep_time) {
+            return BD_OPEN3D_MVC_UNIT_FLAG_NONE;
+        }
+
+        if (base->dts == dep->dts && base->dts > 0) {
+            return BD_OPEN3D_MVC_UNIT_FLAG_MATCHED;
+        }
+
+        return BD_OPEN3D_MVC_UNIT_FLAG_MATCHED | BD_OPEN3D_MVC_UNIT_FLAG_RELAXED_DTS;
+    }
+
+    if (base->pts > 0 && dep->pts > 0 && base->pts == dep->pts) {
+        return BD_OPEN3D_MVC_UNIT_FLAG_MATCHED | BD_OPEN3D_MVC_UNIT_FLAG_RELAXED_DTS;
+    }
+
+    if (_open3d_mvc_relaxed_window_match(base, dep)) {
+        return BD_OPEN3D_MVC_UNIT_FLAG_MATCHED | BD_OPEN3D_MVC_UNIT_FLAG_RELAXED_DTS;
+    }
+
+    /* LAV-like fallback: when one side lacks a usable DTS/PTS surface, pair
+     * the current dependent head with the current base unit rather than
+     * degenerating into an extended BASE_ONLY tail. */
+    if (base_time <= 0 || dep_time <= 0) {
+        return BD_OPEN3D_MVC_UNIT_FLAG_MATCHED | BD_OPEN3D_MVC_UNIT_FLAG_RELAXED_DTS;
+    }
+
+    return BD_OPEN3D_MVC_UNIT_FLAG_NONE;
+}
+
+static int _open3d_mvc_queue_unit(BD_OPEN3D_MVC_RUNTIME *mvc,
+                                  const PES_BUFFER *base,
+                                  const PES_BUFFER *dep,
+                                  uint32_t flags,
+                                  uint32_t base_off,
+                                  uint32_t dep_off,
+                                  const uint8_t *base_prefix,
+                                  uint32_t base_prefix_size,
+                                  const uint8_t *dep_prefix,
+                                  uint32_t dep_prefix_size)
+{
+    BD_OPEN3D_MVC_UNIT_NODE *node;
+    uint32_t base_size;
+    uint32_t dep_size;
+    uint32_t merged_size;
+    uint32_t off = 0;
+
+    if (!mvc || !base || base_off > base->len || (dep && dep_off > dep->len)) {
+        return 0;
+    }
+
+    base_size = base->len - base_off;
+    dep_size = dep ? (dep->len - dep_off) : 0;
+
+    node = calloc(1, sizeof(*node));
+    if (!node) {
+        return 0;
+    }
+
+    merged_size = base_prefix_size + base_size + dep_prefix_size + dep_size;
+    if (merged_size > 0) {
+        node->buf = malloc(merged_size);
+        if (!node->buf) {
+            X_FREE(node);
+            return 0;
+        }
+
+        if (base_prefix && base_prefix_size > 0) {
+            memcpy(node->buf + off, base_prefix, base_prefix_size);
+            off += base_prefix_size;
+        }
+        memcpy(node->buf + off, base->buf + base_off, base_size);
+        off += base_size;
+        if (dep_prefix && dep_prefix_size > 0) {
+            memcpy(node->buf + off, dep_prefix, dep_prefix_size);
+            off += dep_prefix_size;
+        }
+        if (dep && dep_size > 0) {
+            memcpy(node->buf + off, dep->buf + dep_off, dep_size);
+        }
+    }
+
+    node->unit.flags = dep ? flags : BD_OPEN3D_MVC_UNIT_FLAG_BASE_ONLY;
+    node->unit.base_size = base_prefix_size + base_size;
+    node->unit.dependent_size = dep_prefix_size + dep_size;
+    node->unit.merged_size = merged_size;
+    node->unit.base_pts = base->pts;
+    node->unit.base_dts = base->dts;
+    node->unit.dependent_pts = dep ? dep->pts : 0;
+    node->unit.dependent_dts = dep ? dep->dts : 0;
+
+    if (!mvc->unit_head) {
+        mvc->unit_head = node;
+        mvc->unit_tail = node;
+    } else {
+        mvc->unit_tail->next = node;
+        mvc->unit_tail = node;
+    }
+
+    mvc->last_unit_base_time = _open3d_mvc_pes_time(base);
+
+    return 1;
+}
+
+static int _open3d_mvc_should_hold_weak_relock(const BD_OPEN3D_MVC_RUNTIME *mvc,
+                                               const PES_BUFFER *base,
+                                               const PES_BUFFER *dep,
+                                               uint32_t flags)
+{
+    int64_t base_time;
+
+    if (!mvc || !base || !dep) {
+        return 0;
+    }
+
+    if (!(flags & BD_OPEN3D_MVC_UNIT_FLAG_MATCHED) ||
+        !(flags & BD_OPEN3D_MVC_UNIT_FLAG_RELAXED_DTS)) {
+        return 0;
+    }
+
+    if (base->dts > 0 && dep->dts > 0) {
+        return 0;
+    }
+
+    base_time = _open3d_mvc_pes_time(base);
+    if (base_time <= 0 || mvc->last_unit_base_time <= 0) {
+        return 0;
+    }
+
+    if (base_time - mvc->last_unit_base_time <= OPEN3D_MVC_WEAK_RELOCK_GAP) {
+        return 0;
+    }
+
+    return 1;
+}
+
+static int _open3d_mvc_should_drop_stale_relaxed(const BD_OPEN3D_MVC_RUNTIME *mvc,
+                                                 const PES_BUFFER *base,
+                                                 const PES_BUFFER *dep,
+                                                 uint32_t flags)
+{
+    int64_t base_emit_time;
+    int64_t dep_emit_time;
+
+    if (!mvc || !base || !dep) {
+        return 0;
+    }
+
+    if (!(flags & BD_OPEN3D_MVC_UNIT_FLAG_MATCHED) ||
+        !(flags & BD_OPEN3D_MVC_UNIT_FLAG_RELAXED_DTS)) {
+        return 0;
+    }
+
+    if (!mvc->stale_relaxed_active || mvc->last_exact_base_time <= 0) {
+        return 0;
+    }
+
+    base_emit_time = _open3d_mvc_pes_emit_time(base);
+    dep_emit_time = _open3d_mvc_pes_emit_time(dep);
+
+    if ((base_emit_time > 0 && base_emit_time <= mvc->last_exact_base_time) ||
+        (dep_emit_time > 0 && dep_emit_time <= mvc->last_exact_base_time)) {
+        return 1;
+    }
+
+    return 0;
+}
+
+static int _open3d_mvc_is_safe_relaxed_follow(const BD_OPEN3D_MVC_RUNTIME *mvc,
+                                              const PES_BUFFER *base,
+                                              const PES_BUFFER *dep,
+                                              uint32_t flags)
+{
+    int64_t base_emit_time;
+    int64_t ref_time;
+
+    if (!mvc || !base || !dep) {
+        return 0;
+    }
+
+    if (!(flags & BD_OPEN3D_MVC_UNIT_FLAG_MATCHED) ||
+        !(flags & BD_OPEN3D_MVC_UNIT_FLAG_RELAXED_DTS)) {
+        return 0;
+    }
+
+    if (!mvc->started) {
+        return 0;
+    }
+
+    if (base->dts > 0 || dep->dts > 0) {
+        return 0;
+    }
+
+    if (base->pts <= 0 || dep->pts <= 0 || base->pts != dep->pts) {
+        return 0;
+    }
+
+    base_emit_time = _open3d_mvc_pes_emit_time(base);
+    if (base_emit_time <= 0) {
+        return 0;
+    }
+
+    ref_time = mvc->last_exact_base_time > 0
+        ? mvc->last_exact_base_time
+        : mvc->last_unit_base_time;
+    if (ref_time <= 0 || base_emit_time < ref_time) {
+        return 0;
+    }
+
+    if (base_emit_time - ref_time > OPEN3D_MVC_SAFE_RELAXED_FOLLOW_WINDOW) {
+        return 0;
+    }
+
+    return 1;
+}
+
+static int _open3d_mvc_is_strong_exact_match(const PES_BUFFER *base,
+                                             const PES_BUFFER *dep,
+                                             uint32_t flags)
+{
+    if (!base || !dep) {
+        return 0;
+    }
+
+    if (!(flags & BD_OPEN3D_MVC_UNIT_FLAG_MATCHED) ||
+        (flags & BD_OPEN3D_MVC_UNIT_FLAG_RELAXED_DTS)) {
+        return 0;
+    }
+
+    if (base->dts <= 0 || dep->dts <= 0) {
+        return 0;
+    }
+
+    return base->dts == dep->dts;
+}
+
+static PES_BUFFER *_open3d_mvc_take_startup_relaxed_dep(BD_OPEN3D_MVC_RUNTIME *mvc,
+                                                        const PES_BUFFER *base,
+                                                        uint32_t *out_flags)
+{
+    PES_BUFFER *best = NULL;
+    PES_BUFFER *it;
+    int64_t base_pts;
+    int64_t best_delta = INT64_MAX;
+
+    if (out_flags) {
+        *out_flags = BD_OPEN3D_MVC_UNIT_FLAG_NONE;
+    }
+
+    if (!mvc || !base || !mvc->dep_queue) {
+        return NULL;
+    }
+
+    base_pts = base->pts > 0 ? base->pts : _open3d_mvc_pes_emit_time(base);
+    if (base_pts <= 0) {
+        return NULL;
+    }
+
+    for (it = mvc->dep_queue; it; it = it->next) {
+        int64_t dep_pts;
+        int64_t delta;
+
+        if (!_open3d_mvc_contains_nal_type(it->buf, it->len, 20)) {
+            continue;
+        }
+
+        dep_pts = it->pts > 0 ? it->pts : _open3d_mvc_pes_emit_time(it);
+        if (dep_pts <= 0) {
+            continue;
+        }
+
+        delta = _open3d_mvc_abs64(dep_pts - base_pts);
+        if (delta > OPEN3D_MVC_STARTUP_RELAXED_PTS_WINDOW) {
+            continue;
+        }
+
+        if (!best || delta < best_delta ||
+            (delta == best_delta && dep_pts <= base_pts &&
+             (best->pts <= 0 || best->pts > base_pts))) {
+            best = it;
+            best_delta = delta;
+        }
+    }
+
+    if (!best) {
+        return NULL;
+    }
+
+    while (mvc->dep_queue && mvc->dep_queue != best) {
+        PES_BUFFER *old = mvc->dep_queue;
+        mvc->dep_queue = old->next;
+        old->next = NULL;
+        pes_buffer_free(&old);
+    }
+
+    if (mvc->dep_queue == best) {
+        mvc->dep_queue = best->next;
+        best->next = NULL;
+    }
+
+    if (out_flags) {
+        *out_flags = BD_OPEN3D_MVC_UNIT_FLAG_MATCHED |
+                     BD_OPEN3D_MVC_UNIT_FLAG_RELAXED_DTS;
+    }
+    return best;
+}
+
+static int _open3d_mvc_ensure_sidecar_locked(BLURAY *bd)
+{
+    BD_OPEN3D_MVC_RUNTIME *mvc;
+    int opened_dep = 0;
+
+    if (!bd || !_open3d_mvc_refresh_runtime_locked(bd)) {
+        return 0;
+    }
+
+    mvc = &bd->open3d_mvc;
+    if (!mvc->info.available || !mvc->dependent_clip ||
+        !mvc->info.base_pid || !mvc->info.dependent_pid) {
+        return 0;
+    }
+
+    if (!mvc->base_demux) {
+        mvc->base_demux = m2ts_demux_init(mvc->info.base_pid);
+    }
+    if (!mvc->dep_demux) {
+        mvc->dep_demux = m2ts_demux_init(mvc->info.dependent_pid);
+    }
+    if (!mvc->base_demux || !mvc->dep_demux) {
+        return 0;
+    }
+
+    if (!mvc->dep_st.fp || mvc->dep_st.clip != mvc->dependent_clip) {
+        _close_m2ts(&mvc->dep_st);
+        m2ts_demux_reset(mvc->dep_demux);
+        pes_buffer_free(&mvc->dep_queue);
+        mvc->dep_st.clip = mvc->dependent_clip;
+        if (!_open_m2ts(bd, &mvc->dep_st)) {
+            return 0;
+        }
+        opened_dep = 1;
+    }
+
+    if (mvc->dep_seek_pending) {
+        if (!opened_dep) {
+            m2ts_demux_reset(mvc->dep_demux);
+            pes_buffer_free(&mvc->dep_queue);
+        }
+        if (_seek_stream(bd, &mvc->dep_st, mvc->dependent_clip, mvc->dep_seek_pkt) < 0) {
+            return 0;
+        }
+        _open3d_mvc_trace("dep_seek_apply dep_clip=%s dep_pkt=%u dep_time=%u",
+                          mvc->dependent_clip->name,
+                          mvc->dep_seek_pkt,
+                          mvc->dep_seek_time);
+        mvc->dep_seek_pending = 0;
+    }
+
+    return 1;
+}
+
+static void _open3d_mvc_drop_dep_before(BD_OPEN3D_MVC_RUNTIME *mvc,
+                                        const PES_BUFFER *base)
+{
+    while (mvc && mvc->dep_queue) {
+        int64_t dep_time = _open3d_mvc_pes_time(mvc->dep_queue);
+        int64_t base_time = _open3d_mvc_pes_time(base);
+
+        if (_open3d_mvc_dep_candidate_ready(base, mvc->dep_queue) ||
+            base_time <= 0 || dep_time <= 0) {
+            break;
+        }
+
+        pes_buffer_next(&mvc->dep_queue);
+    }
+}
+
+static void _open3d_mvc_fill_dep_queue_locked(BLURAY *bd, const PES_BUFFER *base,
+                                              int allow_aging)
+{
+    BD_OPEN3D_MVC_RUNTIME *mvc = &bd->open3d_mvc;
+    int64_t base_time = _open3d_mvc_pes_time(base);
+    int max_blocks = mvc->dep_queue ? OPEN3D_MVC_DEP_FILL_BLOCKS
+                                    : OPEN3D_MVC_DEP_EMPTY_FILL_BLOCKS;
+    int ii;
+
+    if (!mvc->dep_st.fp || !mvc->dep_demux) {
+        return;
+    }
+
+    for (ii = 0; ii < max_blocks; ii++) {
+        PES_BUFFER *dep_list;
+        int r;
+        int64_t dep_time;
+
+        if (allow_aging) {
+            _open3d_mvc_drop_dep_before(mvc, base);
+        }
+        if (mvc->dep_queue) {
+            dep_time = _open3d_mvc_pes_time(mvc->dep_queue);
+            if (_open3d_mvc_dep_candidate_ready(base, mvc->dep_queue) ||
+                base_time <= 0 || dep_time <= 0) {
+                if (ii > 0) {
+                    _open3d_mvc_trace("dep_fill stop blocks=%d base_time=%" PRId64
+                                      " dep_head_pts=%" PRId64 " dep_head_dts=%" PRId64
+                                      " dep_head_time=%" PRId64,
+                                      ii, base_time,
+                                      mvc->dep_queue->pts, mvc->dep_queue->dts, dep_time);
+                }
+                return;
+            }
+        }
+
+        r = _read_block(bd, &mvc->dep_st, mvc->dep_int_buf);
+        if (r <= 0) {
+            _open3d_mvc_trace("dep_fill eof blocks=%d base_time=%" PRId64
+                              " dep_queue=%s",
+                              ii, base_time, mvc->dep_queue ? "nonempty" : "empty");
+            return;
+        }
+
+        dep_list = m2ts_demux(mvc->dep_demux, mvc->dep_int_buf);
+        if (dep_list) {
+            PES_BUFFER *dep_trace = dep_list;
+            while (dep_trace) {
+                _open3d_mvc_cache_dep_startup_prefix(mvc, dep_trace);
+                _open3d_mvc_trace_pes("dep_pes", dep_trace);
+                dep_trace = dep_trace->next;
+            }
+            pes_buffer_append(&mvc->dep_queue, dep_list);
+        }
+    }
+
+    _open3d_mvc_trace("dep_fill budget_hit blocks=%d base_time=%" PRId64
+                      " dep_queue=%s dep_head_pts=%" PRId64 " dep_head_dts=%" PRId64
+                      " dep_head_time=%" PRId64,
+                      max_blocks, base_time,
+                      mvc->dep_queue ? "nonempty" : "empty",
+                      mvc->dep_queue ? mvc->dep_queue->pts : 0,
+                      mvc->dep_queue ? mvc->dep_queue->dts : 0,
+                      mvc->dep_queue ? _open3d_mvc_pes_time(mvc->dep_queue)
+                                     : OPEN3D_MVC_INVALID_TS);
+}
+
+static void _open3d_mvc_process_base_pes_lavlike_locked(BLURAY *bd, PES_BUFFER *base)
+{
+    BD_OPEN3D_MVC_RUNTIME *mvc = &bd->open3d_mvc;
+    PES_BUFFER *dep = NULL;
+    uint32_t flags = BD_OPEN3D_MVC_UNIT_FLAG_NONE;
+    uint32_t base_off = 0;
+    uint32_t dep_off = 0;
+    int64_t base_time;
+    int64_t dep_time = OPEN3D_MVC_INVALID_TS;
+    int64_t base_emit_time = OPEN3D_MVC_INVALID_TS;
+    int64_t dep_emit_time = OPEN3D_MVC_INVALID_TS;
+    int initial_start = 0;
+    int restart_epoch = 0;
+    int runway_needs_exact = 0;
+    int stale_relaxed = 0;
+    int strong_exact = 0;
+    int startup_base_has_idr = 0;
+    int startup_base_has_sps = 0;
+    int startup_base_has_pps = 0;
+    int startup_base_can_use_cached_prefix = 0;
+    const uint8_t *startup_base_prefix = NULL;
+    uint32_t startup_base_prefix_len = 0;
+    const uint8_t *startup_dep_prefix = NULL;
+    uint32_t startup_dep_prefix_len = 0;
+
+    if (!mvc || !base) {
+        return;
+    }
+
+    base_time = _open3d_mvc_pes_time(base);
+    initial_start = !mvc->started;
+    restart_epoch = mvc->seek_restart_pending;
+    runway_needs_exact = mvc->strict_relock_exacts_needed > 0;
+
+    _open3d_mvc_drop_dep_before(mvc, base);
+    _open3d_mvc_fill_dep_queue_locked(bd, base, 1);
+    _open3d_mvc_drop_dep_before(mvc, base);
+    _open3d_mvc_cache_base_startup_prefix(mvc, base);
+
+    if (mvc->dep_queue) {
+        dep_time = _open3d_mvc_pes_time(mvc->dep_queue);
+        flags = _open3d_mvc_match_flags(base, mvc->dep_queue);
+        if ((flags & BD_OPEN3D_MVC_UNIT_FLAG_MATCHED) &&
+            _open3d_mvc_prepare_match_offsets(mvc, base, mvc->dep_queue,
+                                              initial_start, 0, 0,
+                                              &base_off, &dep_off)) {
+            dep = mvc->dep_queue;
+            mvc->dep_queue = dep->next;
+            dep->next = NULL;
+            dep_time = _open3d_mvc_pes_time(dep);
+            base_emit_time = _open3d_mvc_pes_emit_time(base);
+            dep_emit_time = _open3d_mvc_pes_emit_time(dep);
+            strong_exact = _open3d_mvc_is_strong_exact_match(base, dep, flags);
+            stale_relaxed =
+                (flags & BD_OPEN3D_MVC_UNIT_FLAG_RELAXED_DTS) &&
+                mvc->last_unit_base_time > 0 &&
+                ((base_emit_time > 0 && base_emit_time <= mvc->last_unit_base_time) ||
+                 (dep_emit_time > 0 && dep_emit_time <= mvc->last_unit_base_time));
+            _open3d_mvc_trace("lavlike_match base_pts=%" PRId64 " base_dts=%" PRId64
+                              " dep_pts=%" PRId64 " dep_dts=%" PRId64
+                              " flags=0x%x initial=%d restart=%d runway=%u stale=%d strong=%d",
+                              base->pts, base->dts,
+                              dep->pts, dep->dts,
+                              flags, initial_start, restart_epoch,
+                              mvc->strict_relock_exacts_needed, stale_relaxed, strong_exact);
+        } else {
+            _open3d_mvc_trace("lavlike_skip_unmatched base_pts=%" PRId64
+                              " base_dts=%" PRId64 " base_time=%" PRId64
+                              " dep_head_pts=%" PRId64 " dep_head_dts=%" PRId64
+                              " dep_head_time=%" PRId64 " flags=0x%x initial=%d",
+                              base->pts, base->dts, base_time,
+                              mvc->dep_queue->pts, mvc->dep_queue->dts, dep_time,
+                              flags, initial_start);
+        }
+    } else {
+        _open3d_mvc_trace("lavlike_no_dep base_pts=%" PRId64
+                          " base_dts=%" PRId64 " base_time=%" PRId64
+                          " initial=%d warmup_aus=%u",
+                          base->pts, base->dts, base_time,
+                          initial_start, mvc->initial_base_only_aus);
+    }
+
+    if (!dep) {
+        if (!initial_start ||
+            mvc->initial_base_only_aus >= OPEN3D_MVC_INITIAL_BASE_ONLY_WARMUP_AUS ||
+            !_open3d_mvc_find_leading_sync_offset(base->buf, base->len, &base_off) ||
+            base_off >= base->len) {
+            return;
+        }
+
+        _open3d_mvc_queue_unit(mvc, base, NULL, BD_OPEN3D_MVC_UNIT_FLAG_NONE,
+                               base_off, 0, NULL, 0, NULL, 0);
+        if (mvc->initial_base_only_aus < UINT8_MAX) {
+            mvc->initial_base_only_aus++;
+        }
+        _open3d_mvc_trace("lavlike_base_only base_pts=%" PRId64
+                          " base_dts=%" PRId64 " base_time=%" PRId64
+                          " warmup_aus=%u base_off=%u",
+                          base->pts, base->dts, base_time,
+                          mvc->initial_base_only_aus, base_off);
+        return;
+    }
+
+    if (runway_needs_exact && !strong_exact) {
+        _open3d_mvc_trace("lavlike_drop_relaxed_runway base_pts=%" PRId64
+                          " base_dts=%" PRId64 " dep_pts=%" PRId64
+                          " dep_dts=%" PRId64 " flags=0x%x runway=%u",
+                          base->pts, base->dts, dep->pts, dep->dts,
+                          flags, mvc->strict_relock_exacts_needed);
+        pes_buffer_free(&dep);
+        return;
+    }
+
+    if (stale_relaxed) {
+        _open3d_mvc_trace("lavlike_drop_nonmonotonic_relaxed base_pts=%" PRId64
+                          " base_dts=%" PRId64 " dep_pts=%" PRId64
+                          " dep_dts=%" PRId64 " last_unit_time=%" PRId64,
+                          base->pts, base->dts, dep->pts, dep->dts,
+                          mvc->last_unit_base_time);
+        pes_buffer_free(&dep);
+        return;
+    }
+
+    startup_base_has_idr = _open3d_mvc_contains_nal_type(base->buf, base->len, 5);
+    startup_base_has_sps = _open3d_mvc_contains_nal_type(base->buf, base->len, 7);
+    startup_base_has_pps = _open3d_mvc_contains_nal_type(base->buf, base->len, 8);
+    startup_base_can_use_cached_prefix =
+        startup_base_has_idr &&
+        !startup_base_has_sps &&
+        !startup_base_has_pps &&
+        mvc->startup_base_prefix &&
+        mvc->startup_base_prefix_len > 0 &&
+        !mvc->startup_base_prefix_used;
+
+    if (initial_start &&
+        mvc->startup_base_prefix &&
+        mvc->startup_base_prefix_len > 0 &&
+        !mvc->startup_base_prefix_used &&
+        !_open3d_mvc_contains_nal_type(base->buf + base_off,
+                                       base->len - base_off, 7) &&
+        !_open3d_mvc_contains_nal_type(base->buf + base_off,
+                                       base->len - base_off, 8) &&
+        startup_base_can_use_cached_prefix) {
+        startup_base_prefix = mvc->startup_base_prefix;
+        startup_base_prefix_len = mvc->startup_base_prefix_len;
+    }
+
+    if (initial_start &&
+        mvc->startup_dep_prefix &&
+        mvc->startup_dep_prefix_len > 0 &&
+        !mvc->startup_dep_prefix_used &&
+        !_open3d_mvc_contains_nal_type(dep->buf + dep_off,
+                                       dep->len - dep_off, 15)) {
+        startup_dep_prefix = mvc->startup_dep_prefix;
+        startup_dep_prefix_len = mvc->startup_dep_prefix_len;
+    }
+
+    _open3d_mvc_queue_unit(mvc, base, dep, flags, base_off, dep_off,
+                           startup_base_prefix, startup_base_prefix_len,
+                           startup_dep_prefix, startup_dep_prefix_len);
+
+    if (initial_start || restart_epoch) {
+        mvc->strict_relock_exacts_needed = restart_epoch
+            ? OPEN3D_MVC_SEEK_STARTUP_EXACT_RUNWAY
+            : OPEN3D_MVC_STARTUP_EXACT_RUNWAY;
+    }
+    if (strong_exact && mvc->strict_relock_exacts_needed > 0) {
+        mvc->strict_relock_exacts_needed--;
+    }
+
+    mvc->started = 1;
+    mvc->initial_base_only_aus = 0;
+    mvc->pending_hard_relock = 0;
+    mvc->stale_relaxed_active = 0;
+    if (restart_epoch) {
+        mvc->seek_restart_pending = 0;
+        mvc->seek_restart_allow_non_idr = 0;
+        _open3d_mvc_trace("lavlike_seek_restart_complete base_pts=%" PRId64
+                          " base_dts=%" PRId64 " flags=0x%x",
+                          base->pts, base->dts, flags);
+    }
+    if (strong_exact) {
+        mvc->last_exact_base_time = _open3d_mvc_pes_emit_time(base);
+    }
+
+    if (startup_base_prefix_len > 0) {
+        mvc->startup_base_prefix_used = 1;
+        _open3d_mvc_trace("lavlike_startup_base_prefix_apply base_pts=%" PRId64
+                          " base_dts=%" PRId64 " prefix_len=%u",
+                          base->pts, base->dts, startup_base_prefix_len);
+    }
+    if (startup_dep_prefix_len > 0) {
+        mvc->startup_dep_prefix_used = 1;
+        _open3d_mvc_trace("lavlike_startup_dep_prefix_apply base_pts=%" PRId64
+                          " base_dts=%" PRId64 " prefix_len=%u",
+                          base->pts, base->dts, startup_dep_prefix_len);
+    }
+    if (initial_start || restart_epoch || runway_needs_exact) {
+        _open3d_mvc_trace("lavlike_runway_state base_pts=%" PRId64
+                          " base_dts=%" PRId64 " remaining=%u",
+                          base->pts, base->dts, mvc->strict_relock_exacts_needed);
+    }
+
+    pes_buffer_free(&dep);
+}
+
+static void _open3d_mvc_process_base_pes_locked(BLURAY *bd, PES_BUFFER *base)
+{
+    if (!bd || !base) {
+        return;
+    }
+
+    _open3d_mvc_process_base_pes_lavlike_locked(bd, base);
+}
+
+static void _open3d_mvc_process_block_locked(BLURAY *bd, uint8_t *block)
+{
+    BD_OPEN3D_MVC_RUNTIME *mvc = &bd->open3d_mvc;
+    PES_BUFFER *base_list;
+
+    if (!bd || !block || !_open3d_mvc_ensure_sidecar_locked(bd)) {
+        return;
+    }
+
+    base_list = m2ts_demux(mvc->base_demux, block);
+    while (base_list) {
+        PES_BUFFER *base = base_list;
+        base_list = base->next;
+        base->next = NULL;
+        _open3d_mvc_trace_pes("base_pes", base);
+        _open3d_mvc_process_base_pes_locked(bd, base);
+        pes_buffer_free(&base);
     }
 }
 
@@ -1630,6 +4206,7 @@ void bd_close(BLURAY *bd)
     _close_m2ts(&bd->st0);
     _close_preload(&bd->st_ig);
     _close_preload(&bd->st_textst);
+    _open3d_mvc_reset_runtime(bd);
 
     nav_free_title_list(&bd->title_list);
     nav_title_close(&bd->title);
@@ -1709,13 +4286,22 @@ static int64_t _seek_internal(BLURAY *bd,
                            const NAV_CLIP *clip, uint32_t title_pkt, uint32_t clip_pkt)
 {
     int64_t result;
+    uint32_t actual_clip_pkt = clip_pkt;
+    uint32_t actual_title_pkt = title_pkt;
 
-    result = _seek_stream(bd, &bd->st0, clip, clip_pkt);
+    _open3d_mvc_reset_runtime(bd);
+
+    actual_clip_pkt = _open3d_mvc_select_base_seek_candidate_locked(bd, clip, clip_pkt);
+    actual_title_pkt = clip->title_pkt + actual_clip_pkt - clip->start_pkt;
+
+    result = _seek_stream(bd, &bd->st0, clip, actual_clip_pkt);
     if (result >= 0) {
         uint32_t media_time;
 
+        _open3d_mvc_prepare_dep_seek_locked(bd, clip, actual_clip_pkt);
+
         /* update title position */
-        bd->s_pos = (uint64_t)title_pkt * 192;
+        bd->s_pos = (uint64_t)actual_title_pkt * 192;
 
         /* Update PSR_TIME */
         media_time = _update_time_psr_from_stream(bd);
@@ -2125,6 +4711,7 @@ static int _bd_read(BLURAY *bd, unsigned char *buf, int len)
 
                 int r = _read_block(bd, st, bd->int_buf);
                 if (r > 0) {
+                    _open3d_mvc_process_block_locked(bd, bd->int_buf);
 
                     if (st->ig_pid > 0) {
                         if (gc_decode_ts(bd->graphics_controller, st->ig_pid, bd->int_buf, 1, -1) > 0) {
@@ -2468,6 +5055,7 @@ static void _close_playlist(BLURAY *bd)
     _close_m2ts(&bd->st0);
     _close_preload(&bd->st_ig);
     _close_preload(&bd->st_textst);
+    _open3d_mvc_reset_runtime(bd);
 
     nav_title_close(&bd->title);
 
@@ -4244,6 +6832,77 @@ const struct meta_dl *bd_get_meta(BLURAY *bd)
 int bd_get_meta_file(BLURAY *bd, const char *name, void **data, int64_t *size)
 {
     return _bd_read_file(bd, DIR_SEP "BDMV" DIR_SEP "META" DIR_SEP "DL", name, data, size);
+}
+
+int bd_open3d_mvc_get_info(BLURAY *bd, BD_OPEN3D_MVC_INFO *info)
+{
+    int ret = 0;
+
+    if (!bd || !info) {
+        return 0;
+    }
+
+    memset(info, 0, sizeof(*info));
+
+    bd_mutex_lock(&bd->mutex);
+    if (_open3d_mvc_refresh_runtime_locked(bd)) {
+        *info = bd->open3d_mvc.info;
+        ret = 1;
+    }
+    bd_mutex_unlock(&bd->mutex);
+
+    return ret;
+}
+
+int bd_open3d_mvc_read_unit(BLURAY *bd, BD_OPEN3D_MVC_UNIT *unit,
+                            uint8_t *buf, uint32_t *buf_size)
+{
+    int ret = 0;
+    uint32_t capacity = buf_size ? *buf_size : 0;
+
+    if (!bd) {
+        return 0;
+    }
+
+    if (unit) {
+        memset(unit, 0, sizeof(*unit));
+    }
+    if (buf_size) {
+        *buf_size = 0;
+    }
+
+    bd_mutex_lock(&bd->mutex);
+    if (bd->open3d_mvc.unit_head) {
+        BD_OPEN3D_MVC_UNIT_NODE *node = bd->open3d_mvc.unit_head;
+        uint32_t need = node->unit.merged_size;
+
+        if (unit) {
+            *unit = node->unit;
+        }
+
+        if (buf_size) {
+            *buf_size = need;
+        }
+
+        if ((need > 0 && (!buf || !buf_size || capacity < need)) ||
+            (need == 0 && !buf_size)) {
+            ret = -1;
+        } else {
+            if (need > 0) {
+                memcpy(buf, node->buf, need);
+            }
+            bd->open3d_mvc.unit_head = node->next;
+            if (!bd->open3d_mvc.unit_head) {
+                bd->open3d_mvc.unit_tail = NULL;
+            }
+            X_FREE(node->buf);
+            X_FREE(node);
+            ret = 1;
+        }
+    }
+    bd_mutex_unlock(&bd->mutex);
+
+    return ret;
 }
 
 /*
