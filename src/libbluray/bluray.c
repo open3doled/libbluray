@@ -110,6 +110,16 @@ struct bd_open3d_mvc_unit_node_s {
     BD_OPEN3D_MVC_UNIT_NODE *next;
 };
 
+typedef struct bd_open3d_mvc_offset_node_s BD_OPEN3D_MVC_OFFSET_NODE;
+struct bd_open3d_mvc_offset_node_s {
+    int64_t                   pts;
+    uint8_t                   frame_rate;
+    uint8_t                   sequence_count;
+    uint8_t                   frame_count;
+    uint8_t                  *controls;
+    BD_OPEN3D_MVC_OFFSET_NODE *next;
+};
+
 typedef struct {
     uint8_t                valid;
     BD_OPEN3D_MVC_INFO     info;
@@ -120,6 +130,9 @@ typedef struct {
     PES_BUFFER            *dep_queue;
     BD_OPEN3D_MVC_UNIT_NODE *unit_head;
     BD_OPEN3D_MVC_UNIT_NODE *unit_tail;
+    BD_OPEN3D_MVC_OFFSET_NODE *offset_head;
+    BD_OPEN3D_MVC_OFFSET_NODE *offset_tail;
+    unsigned               offset_count;
     int64_t                last_unit_base_time;
     int64_t                last_exact_base_time;
     uint8_t                strict_relock_exacts_needed;
@@ -229,6 +242,8 @@ static int64_t _seek_stream(BLURAY *bd, BD_STREAM *st,
 
 /* Stream Packet Number = byte offset / 192. Avoid 64-bit division. */
 #define SPN(pos) (((uint32_t)((pos) >> 6)) / 3)
+
+#define OPEN3D_MVC_MAX_OFFSET_GOPS 128
 
 
 /*
@@ -644,6 +659,21 @@ static void _open3d_mvc_free_unit_queue(BD_OPEN3D_MVC_RUNTIME *mvc)
     }
 }
 
+static void _open3d_mvc_free_offset_queue(BD_OPEN3D_MVC_RUNTIME *mvc)
+{
+    while (mvc && mvc->offset_head) {
+        BD_OPEN3D_MVC_OFFSET_NODE *node = mvc->offset_head;
+        mvc->offset_head = node->next;
+        X_FREE(node->controls);
+        X_FREE(node);
+    }
+
+    if (mvc) {
+        mvc->offset_tail = NULL;
+        mvc->offset_count = 0;
+    }
+}
+
 static void _open3d_mvc_flush_sidecar(BD_OPEN3D_MVC_RUNTIME *mvc)
 {
     if (!mvc) {
@@ -655,6 +685,7 @@ static void _open3d_mvc_flush_sidecar(BD_OPEN3D_MVC_RUNTIME *mvc)
     m2ts_demux_free(&mvc->dep_demux);
     pes_buffer_free(&mvc->dep_queue);
     _open3d_mvc_free_unit_queue(mvc);
+    _open3d_mvc_free_offset_queue(mvc);
     X_FREE(mvc->startup_base_prefix);
     mvc->startup_base_prefix_len = 0;
     mvc->startup_base_prefix_used = 0;
@@ -694,6 +725,260 @@ static int _open3d_mvc_runtime_matches_current(BLURAY *bd, unsigned main_playite
     }
 
     return 1;
+}
+
+static int _open3d_mvc_get_rate_fraction(uint8_t rate_code,
+                                         uint32_t *num, uint32_t *den)
+{
+    switch (rate_code) {
+        case BLURAY_VIDEO_RATE_24000_1001:
+            *num = 24000;
+            *den = 1001;
+            return 1;
+        case BLURAY_VIDEO_RATE_24:
+            *num = 24;
+            *den = 1;
+            return 1;
+        case BLURAY_VIDEO_RATE_25:
+            *num = 25;
+            *den = 1;
+            return 1;
+        case BLURAY_VIDEO_RATE_30000_1001:
+            *num = 30000;
+            *den = 1001;
+            return 1;
+        case BLURAY_VIDEO_RATE_50:
+            *num = 50;
+            *den = 1;
+            return 1;
+        case BLURAY_VIDEO_RATE_60000_1001:
+            *num = 60000;
+            *den = 1001;
+            return 1;
+        default:
+            return 0;
+    }
+}
+
+static uint8_t _open3d_mvc_normalize_offset_rate(uint8_t raw_rate)
+{
+    uint8_t rate = raw_rate & 0x0f;
+    return rate ? rate : raw_rate;
+}
+
+static int8_t _open3d_mvc_decode_raw_offset(uint8_t raw)
+{
+    if (raw == 0x00 || raw == 0x80) {
+        return 0;
+    }
+    if (raw & 0x80) {
+        return -(int8_t)(raw & 0x7f);
+    }
+    return (int8_t)(raw & 0x7f);
+}
+
+static int _open3d_mvc_offset_gop_equals(const BD_OPEN3D_MVC_OFFSET_NODE *node,
+                                         int64_t pts,
+                                         uint8_t frame_rate,
+                                         uint8_t sequence_count,
+                                         uint8_t frame_count,
+                                         const uint8_t *controls)
+{
+    uint32_t control_count = (uint32_t)sequence_count * (uint32_t)frame_count;
+
+    if (!node || node->pts != pts ||
+        node->frame_rate != frame_rate ||
+        node->sequence_count != sequence_count ||
+        node->frame_count != frame_count) {
+        return 0;
+    }
+
+    if (control_count == 0) {
+        return 1;
+    }
+
+    return !memcmp(node->controls, controls, control_count);
+}
+
+static void _open3d_mvc_prune_offset_queue(BD_OPEN3D_MVC_RUNTIME *mvc)
+{
+    while (mvc && mvc->offset_count > OPEN3D_MVC_MAX_OFFSET_GOPS && mvc->offset_head) {
+        BD_OPEN3D_MVC_OFFSET_NODE *node = mvc->offset_head;
+        mvc->offset_head = node->next;
+        if (!mvc->offset_head) {
+            mvc->offset_tail = NULL;
+        }
+        mvc->offset_count--;
+        X_FREE(node->controls);
+        X_FREE(node);
+    }
+}
+
+static void _open3d_mvc_store_offset_gop(BD_OPEN3D_MVC_RUNTIME *mvc,
+                                         int64_t pts,
+                                         uint8_t frame_rate,
+                                         uint8_t sequence_count,
+                                         uint8_t frame_count,
+                                         const uint8_t *controls)
+{
+    BD_OPEN3D_MVC_OFFSET_NODE *node;
+    uint32_t control_count;
+
+    if (!mvc || pts < 0 || !sequence_count || !frame_count || !controls) {
+        return;
+    }
+
+    if (mvc->offset_tail &&
+        _open3d_mvc_offset_gop_equals(mvc->offset_tail, pts, frame_rate,
+                                      sequence_count, frame_count, controls)) {
+        return;
+    }
+
+    control_count = (uint32_t)sequence_count * (uint32_t)frame_count;
+
+    node = calloc(1, sizeof(*node));
+    if (!node) {
+        return;
+    }
+
+    node->controls = malloc(control_count);
+    if (!node->controls) {
+        X_FREE(node);
+        return;
+    }
+
+    memcpy(node->controls, controls, control_count);
+    node->pts = pts;
+    node->frame_rate = frame_rate;
+    node->sequence_count = sequence_count;
+    node->frame_count = frame_count;
+
+    if (!mvc->offset_head) {
+        mvc->offset_head = node;
+        mvc->offset_tail = node;
+    } else {
+        mvc->offset_tail->next = node;
+        mvc->offset_tail = node;
+    }
+
+    mvc->offset_count++;
+    _open3d_mvc_prune_offset_queue(mvc);
+}
+
+static void _open3d_mvc_parse_offset_metadata(BD_OPEN3D_MVC_RUNTIME *mvc,
+                                              int64_t pts,
+                                              const uint8_t *buf,
+                                              uint32_t len)
+{
+    static const uint8_t bdrom_metadata_guid[16] = {
+        0x17, 0xee, 0x8c, 0x60, 0xf8, 0x4d, 0x11, 0xd9,
+        0x8c, 0xd6, 0x08, 0x00, 0x20, 0x0c, 0x9a, 0x66
+    };
+    uint32_t ii;
+
+    if (!mvc || !buf || len < 28 || pts < 0) {
+        return;
+    }
+
+    for (ii = 0; ii + 28 <= len; ++ii) {
+        const uint8_t *body;
+        uint32_t remain;
+        uint8_t sequence_count;
+        uint8_t frame_count;
+        uint32_t control_count;
+
+        if (memcmp(buf + ii, bdrom_metadata_guid, sizeof(bdrom_metadata_guid))) {
+            continue;
+        }
+
+        body = buf + ii + sizeof(bdrom_metadata_guid);
+        remain = len - ii - sizeof(bdrom_metadata_guid);
+        if (remain < 12 || memcmp(body, "OFMD", 4)) {
+            continue;
+        }
+
+        body += 4;
+        remain -= 4;
+
+        sequence_count = body[6] & 0x3f;
+        frame_count = body[7];
+        if (!sequence_count || !frame_count) {
+            continue;
+        }
+
+        control_count = (uint32_t)sequence_count * (uint32_t)frame_count;
+        if (remain < 8 + control_count) {
+            continue;
+        }
+
+        _open3d_mvc_store_offset_gop(mvc, pts,
+                                     _open3d_mvc_normalize_offset_rate(body[0]),
+                                     sequence_count,
+                                     frame_count, body + 8);
+    }
+}
+
+static const BD_OPEN3D_MVC_OFFSET_NODE *_open3d_mvc_find_offset_gop(const BD_OPEN3D_MVC_RUNTIME *mvc,
+                                                                    int64_t pts)
+{
+    const BD_OPEN3D_MVC_OFFSET_NODE *best = NULL;
+
+    if (!mvc || !mvc->offset_head) {
+        return NULL;
+    }
+
+    for (const BD_OPEN3D_MVC_OFFSET_NODE *node = mvc->offset_head;
+         node != NULL; node = node->next) {
+        if (pts < 0) {
+            return node;
+        }
+        if (node->pts <= pts) {
+            best = node;
+            continue;
+        }
+        break;
+    }
+
+    return best ? best : mvc->offset_head;
+}
+
+static int _open3d_mvc_offset_frame_index(const BD_OPEN3D_MVC_OFFSET_NODE *node,
+                                          int64_t pts)
+{
+    uint32_t num, den;
+    uint64_t denom;
+    int64_t delta;
+
+    if (!node || !node->frame_count) {
+        return 0;
+    }
+
+    if (pts <= node->pts) {
+        return 0;
+    }
+
+    if (!_open3d_mvc_get_rate_fraction(node->frame_rate, &num, &den)) {
+        return 0;
+    }
+
+    delta = pts - node->pts;
+    if (delta <= 0) {
+        return 0;
+    }
+
+    denom = 90000ULL * (uint64_t)den;
+    if (!denom) {
+        return 0;
+    }
+
+    {
+        uint64_t rounded = ((uint64_t)delta * (uint64_t)num) + (denom / 2);
+        uint32_t frame_index = (uint32_t)(rounded / denom);
+        if (frame_index >= node->frame_count) {
+            frame_index = node->frame_count - 1;
+        }
+        return (int)frame_index;
+    }
 }
 
 static unsigned _open3d_current_playitem_index(BLURAY *bd)
@@ -2554,6 +2839,10 @@ static int _open3d_mvc_queue_unit(BD_OPEN3D_MVC_RUNTIME *mvc,
     node->unit.base_dts = base->dts;
     node->unit.dependent_pts = dep ? dep->pts : 0;
     node->unit.dependent_dts = dep ? dep->dts : 0;
+
+    if (merged_size > 0 && base->pts >= 0) {
+        _open3d_mvc_parse_offset_metadata(mvc, base->pts, node->buf, merged_size);
+    }
 
     if (!mvc->unit_head) {
         mvc->unit_head = node;
@@ -6914,6 +7203,46 @@ int bd_open3d_mvc_read_unit(BLURAY *bd, BD_OPEN3D_MVC_UNIT *unit,
             ret = 1;
         }
     }
+    bd_mutex_unlock(&bd->mutex);
+
+    return ret;
+}
+
+int bd_open3d_mvc_get_pg_offset(BLURAY *bd, uint8_t offset_sequence_id,
+                                int64_t pts, BD_OPEN3D_PG_OFFSET *offset)
+{
+    const BD_OPEN3D_MVC_OFFSET_NODE *node = NULL;
+    int frame_index;
+    uint8_t raw;
+    int ret = 0;
+
+    if (!bd || !offset || offset_sequence_id == 0xff) {
+        return 0;
+    }
+
+    memset(offset, 0, sizeof(*offset));
+
+    bd_mutex_lock(&bd->mutex);
+    node = _open3d_mvc_find_offset_gop(&bd->open3d_mvc, pts);
+    if (!node || offset_sequence_id >= node->sequence_count || !node->frame_count) {
+        bd_mutex_unlock(&bd->mutex);
+        return 0;
+    }
+
+    frame_index = _open3d_mvc_offset_frame_index(node, pts);
+    raw = node->controls[(uint32_t)offset_sequence_id * (uint32_t)node->frame_count +
+                         (uint32_t)frame_index];
+
+    offset->valid = 1;
+    offset->offset_sequence_id = offset_sequence_id;
+    offset->frame_rate = node->frame_rate;
+    offset->sequence_count = node->sequence_count;
+    offset->frame_count = node->frame_count;
+    offset->raw_offset = raw;
+    offset->signed_offset = _open3d_mvc_decode_raw_offset(raw);
+    offset->frame_index = frame_index;
+    offset->gop_pts = node->pts;
+    ret = 1;
     bd_mutex_unlock(&bd->mutex);
 
     return ret;

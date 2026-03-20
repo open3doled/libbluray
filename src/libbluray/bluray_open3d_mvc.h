@@ -58,9 +58,24 @@ typedef struct bd_open3d_mvc_unit {
     int64_t  dependent_dts;
 } BD_OPEN3D_MVC_UNIT;
 
+typedef struct bd_open3d_pg_offset {
+    uint8_t valid;
+    uint8_t offset_sequence_id;
+    uint8_t frame_rate;
+    uint8_t sequence_count;
+    uint8_t frame_count;
+    uint8_t raw_offset;
+    int8_t  signed_offset;
+    uint8_t reserved0;
+    int32_t frame_index;
+    int64_t gop_pts;
+} BD_OPEN3D_PG_OFFSET;
+
 BD_PUBLIC int bd_open3d_mvc_get_info(BLURAY *bd, BD_OPEN3D_MVC_INFO *info);
 BD_PUBLIC int bd_open3d_mvc_read_unit(BLURAY *bd, BD_OPEN3D_MVC_UNIT *unit,
                                       uint8_t *buf, uint32_t *buf_size);
+BD_PUBLIC int bd_open3d_mvc_get_pg_offset(BLURAY *bd, uint8_t offset_sequence_id,
+                                          int64_t pts, BD_OPEN3D_PG_OFFSET *offset);
 
 #ifdef __cplusplus
 }
