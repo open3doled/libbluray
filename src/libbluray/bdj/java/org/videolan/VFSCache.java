@@ -318,11 +318,25 @@ class VFSCache {
      * Add file from binding unit data area to cache
      */
     protected boolean add(String vpFile, String budaFile) {
+        if (vpFile == null || budaFile == null) {
+            logger.error("invalid binding unit asset mapping " + vpFile + " <- " + budaFile);
+            return false;
+        }
+
+        while (vpFile.startsWith(File.separator)) {
+            vpFile = vpFile.substring(1);
+        }
 
         String srcPath = System.getProperty("bluray.bindingunit.root") + File.separator + budaFile;
         String dstPath = cacheRoot + vpFile;
+        File parent = new File(dstPath).getParentFile();
 
         synchronized (lock) {
+            if (parent != null && !parent.isDirectory() && !parent.mkdirs() && !parent.isDirectory()) {
+                logger.error("error creating VFS cache directory " + parent.getPath());
+                return false;
+            }
+
             return copyFile(srcPath, dstPath);
         }
     }
@@ -355,6 +369,23 @@ class VFSCache {
 
         logger.info("using cached " + cachePath);
         return cachePath;
+    }
+
+    public String[] list(String absPath) {
+
+        if (cacheAll) {
+            return null;
+        }
+
+        if (!absPath.startsWith(vfsRoot)) {
+            return null;
+        }
+
+        String cachePath = cacheRoot + absPath.substring(vfsRootLength);
+
+        synchronized (lock) {
+            return BDFileSystem.nativeList(new File(cachePath));
+        }
     }
 
     private Object lock = new Object();

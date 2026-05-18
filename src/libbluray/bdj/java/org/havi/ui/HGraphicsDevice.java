@@ -20,12 +20,14 @@
 
 package org.havi.ui;
 
+import org.blurayx.s3d.ui.HGraphicsConfigurationS3D;
 import org.blurayx.s3d.ui.HGraphicsConfigTemplateS3D;
 import org.blurayx.uhd.ui.HGraphicsConfigurationTemplateUHD;
 
 import java.awt.Dimension;
 
 import org.videolan.GUIManager;
+import org.videolan.Libbluray;
 import org.videolan.Logger;
 
 public class HGraphicsDevice extends HScreenDevice {
@@ -44,9 +46,18 @@ public class HGraphicsDevice extends HScreenDevice {
                 hgct = new HGraphicsConfigTemplate();
             }
             HScreenConfigTemplate.initDefaultConfigTemplate(hgct, i);
-            hgcArray[i] = new HGraphicsConfiguration(hgct);
+            if (is_p5) {
+                hgcArray[i] = new HGraphicsConfigurationS3D(hgct);
+            } else {
+                hgcArray[i] = new HGraphicsConfiguration(hgct);
+            }
         }
         hgc = hgcArray[0];
+        publishGraphicsS3DState(hgc);
+        logger.info("TRACE s3d-device device=graphics profile5=" + is_p5 +
+                    " profile6=" + is_p6 +
+                    " configCount=" + length +
+                    " sampleConfig=" + describeConfig(hgc));
     }
 
     public HGraphicsConfiguration[] getConfigurations() {
@@ -54,6 +65,8 @@ public class HGraphicsDevice extends HScreenDevice {
     }
 
     public HGraphicsConfiguration getDefaultConfiguration() {
+        logger.info("TRACE s3d-device device=graphics op=getDefaultConfiguration selected=" +
+                    describeConfig(hgcArray[0]));
         return hgcArray[0];
     }
 
@@ -63,6 +76,9 @@ public class HGraphicsDevice extends HScreenDevice {
         for (int i = 0; i < hgcArray.length; i++)
             if (hgct.match(hgcArray[i]) > score)
                 hgc = hgcArray[i];
+        logger.info("TRACE s3d-device device=graphics op=getBestConfiguration requestedTemplate=" +
+                    describeTemplate(hgct) +
+                    " selected=" + describeConfig(hgc));
         return hgc;
     }
 
@@ -73,18 +89,30 @@ public class HGraphicsDevice extends HScreenDevice {
             for (int j = 0; j < hgcta.length; j++)
                 if (hgcta[j].match(hgcArray[i]) > score)
                     hgc = hgcArray[i];
+        logger.info("TRACE s3d-device device=graphics op=getBestConfigurationArray requestedTemplates=" +
+                    describeTemplates(hgcta) +
+                    " selected=" + describeConfig(hgc));
         return hgc;
     }
 
     public HGraphicsConfiguration getCurrentConfiguration() {
+        logger.info("TRACE s3d-device device=graphics op=getCurrentConfiguration selected=" +
+                    describeConfig(hgc));
         return hgc;
     }
 
     public boolean setGraphicsConfiguration(HGraphicsConfiguration hgc)
             throws SecurityException, HPermissionDeniedException,
             HConfigurationException {
-
-        logger.unimplemented("setGraphicsConfiguration");
+        if (hgc == null) {
+            throw new IllegalArgumentException("HGraphicsConfiguration cannot be null");
+        }
+        logger.info("TRACE s3d-device device=graphics op=setGraphicsConfiguration current=" +
+                    describeConfig(this.hgc) +
+                    " requested=" + describeConfig(hgc));
+        if (this.hgc == hgc) {
+            return true;
+        }
 
         GUIManager mgr = GUIManager.getInstance();
         Dimension d = hgc.getPixelResolution();
@@ -113,7 +141,66 @@ public class HGraphicsDevice extends HScreenDevice {
         }
 
         this.hgc = hgc;
+        publishGraphicsS3DState(hgc);
         return true;
+    }
+
+    private static void publishGraphicsS3DState(HGraphicsConfiguration config) {
+        int mode = Libbluray.IG_S3D_MODE_UNKNOWN;
+        boolean modeValid = false;
+        int offset = 0;
+        boolean offsetValid = false;
+
+        if (config instanceof HGraphicsConfigurationS3D) {
+            HGraphicsConfigurationS3D s3dConfig = (HGraphicsConfigurationS3D)config;
+            mode = s3dConfig.getS3DModeValue();
+            modeValid = (mode != Libbluray.IG_S3D_MODE_UNKNOWN);
+            offset = s3dConfig.getOffsetValue();
+            offsetValid = s3dConfig.hasExplicitOffsetValue();
+        } else if (config != null) {
+            mode = Libbluray.IG_S3D_MODE_TWOD_OUTPUT;
+            modeValid = true;
+        }
+
+        logger.info("TRACE s3d-device publish-state config=" + describeConfig(config) +
+                    " mode=" + mode +
+                    " modeValid=" + modeValid +
+                    " offset=" + offset +
+                    " offsetValid=" + offsetValid);
+        Libbluray.setGraphicsS3DState(mode, modeValid, offset, offsetValid);
+    }
+
+    private static String describeConfig(HGraphicsConfiguration config) {
+        if (config == null) {
+            return "<null>";
+        }
+        return config.getClass().getName() +
+               "{template=" + describeTemplate(config.getConfigTemplate()) +
+               ", resolution=" + config.getPixelResolution() +
+               "}";
+    }
+
+    private static String describeTemplate(HGraphicsConfigTemplate template) {
+        if (template == null) {
+            return "<null>";
+        }
+        return template.getClass().getName() +
+               "@" + Integer.toHexString(System.identityHashCode(template));
+    }
+
+    private static String describeTemplates(HGraphicsConfigTemplate[] templates) {
+        if (templates == null) {
+            return "<null>";
+        }
+        StringBuffer sb = new StringBuffer("[");
+        for (int i = 0; i < templates.length; i++) {
+            if (i > 0) {
+                sb.append(", ");
+            }
+            sb.append(describeTemplate(templates[i]));
+        }
+        sb.append("]");
+        return sb.toString();
     }
 
     private HGraphicsConfiguration[] hgcArray;

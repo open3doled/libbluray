@@ -207,6 +207,23 @@ typedef enum {
                                                 // 96 mpl/dts-hd
 } bd_audio_rate_e;
 
+/** BD-J interactive graphics stereoscopic mode */
+typedef enum {
+    BLURAY_IG_S3D_MODE_UNKNOWN      = 0,
+    BLURAY_IG_S3D_MODE_TWOD_OUTPUT  = 1,
+    BLURAY_IG_S3D_MODE_ONE_PLANE    = 2,
+    BLURAY_IG_S3D_MODE_TWO_PLANES   = 3,
+} bd_ig_s3d_mode_e;
+
+/** Last published BD-J interactive graphics stereoscopic state */
+typedef struct {
+    uint64_t epoch;
+    uint8_t  mode_valid;
+    uint8_t  offset_valid;
+    int32_t  mode;
+    int32_t  offset;
+} BLURAY_IG_S3D_STATE;
+
 /** Text subtitle charset */
 typedef enum {
     BLURAY_TEXT_CHAR_CODE_UTF8            = 0x01,
@@ -1030,6 +1047,13 @@ BD_PUBLIC void bd_register_overlay_proc(BLURAY *bd, void *handle, bd_overlay_pro
  * @return 1 on success, 0 if error
  */
 BD_PUBLIC void bd_register_argb_overlay_proc(BLURAY *bd, void *handle, bd_argb_overlay_proc_f func, struct bd_argb_buffer_s *buf);
+
+/*
+ * Query last published BD-J interactive graphics stereoscopic state.
+ *
+ * Returns 1 and fills state on success, 0 if bd/state is NULL.
+ */
+BD_PUBLIC int bd_get_ig_s3d_state(BLURAY *bd, BLURAY_IG_S3D_STATE *state);
 
 
 /*

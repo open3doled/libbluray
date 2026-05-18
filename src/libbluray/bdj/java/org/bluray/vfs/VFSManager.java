@@ -21,6 +21,7 @@
 package org.bluray.vfs;
 
 import org.videolan.BUMFAsset;
+import org.videolan.BDJLoader;
 import org.videolan.BUMFParser;
 import org.videolan.Logger;
 
@@ -83,9 +84,16 @@ public class VFSManager {
             throw new PreparingFailedException();
         }
 
-        logger.unimplemented("requestUpdating(" + manifestfile + ")");
-        state = STABLE;
-        throw new PreparingFailedException();
+        if (!BDJLoader.cacheVFSAssets(assets)) {
+            logger.error("caching binding unit assets failed");
+            state = STABLE;
+            throw new PreparingFailedException();
+        }
+
+        state = PREPARED;
+        logger.info("prepared " + assets.length + " binding unit assets from " + manifestfile +
+                    " signature=" + signaturefile +
+                    " initBackupRegs=" + initBackupRegs);
     }
 
     private int state;

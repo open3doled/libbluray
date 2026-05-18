@@ -31,6 +31,7 @@ import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
+import java.util.LinkedHashSet;
 
 import java.security.AccessController;
 import java.security.PrivilegedAction;
@@ -408,8 +409,26 @@ public abstract class BDFileSystem extends FileSystem {
         int rootLength = root.length();
         path = path.substring(rootLength);
 
-        String[] names = org.videolan.Libbluray.listBdFiles(path, false);
-        return names;
+        String[] nativeNames = org.videolan.Libbluray.listBdFiles(path, false);
+        String[] cacheNames = BDJLoader.getCachedFiles(f.getPath());
+        if (cacheNames == null || cacheNames.length == 0) {
+            return nativeNames;
+        }
+        if (nativeNames == null || nativeNames.length == 0) {
+            logger.info("list(): using cached directory entries for " + f.getPath());
+            return cacheNames;
+        }
+
+        LinkedHashSet merged = new LinkedHashSet();
+        for (int i = 0; i < nativeNames.length; i++) {
+            merged.add(nativeNames[i]);
+        }
+        for (int i = 0; i < cacheNames.length; i++) {
+            merged.add(cacheNames[i]);
+        }
+
+        logger.info("list(): merged native and cached directory entries for " + f.getPath());
+        return (String[])merged.toArray(new String[merged.size()]);
     }
 
     public boolean createDirectory(File f) {

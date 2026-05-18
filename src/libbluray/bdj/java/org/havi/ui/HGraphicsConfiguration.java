@@ -33,7 +33,7 @@ public class HGraphicsConfiguration extends HScreenConfiguration {
     protected HGraphicsConfiguration() {
     }
 
-    HGraphicsConfiguration(HGraphicsConfigTemplate hgct) {
+    protected HGraphicsConfiguration(HGraphicsConfigTemplate hgct) {
         super(hgct);
         this.hgct = hgct;
     }

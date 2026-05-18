@@ -1,6 +1,6 @@
 /*
  * This file is part of libbluray
- * Copyright (C) 2017  VideoLAN
+ * Copyright (C) 2026  Open3DOLED
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -17,36 +17,30 @@
  * <http://www.gnu.org/licenses/>.
  */
 
-/*
- * BD-J support classes for libmmbd
- */
-
-package org.videolan.mmbd;
+package org.videolan.bdpluscompat;
 
 import java.io.ByteArrayOutputStream;
-import java.io.InputStream;
 import java.io.IOException;
-import java.io.OutputStream;
-import java.util.HashMap;
-import java.util.Map;
+import java.io.InputStream;
 import java.security.AccessController;
 import java.security.PrivilegedAction;
-
-import org.videolan.BDJClassFileTransformer;
-import org.videolan.BDJClassLoaderAdapter;
-import org.videolan.BDJXletContext;
-import org.videolan.Logger;
+import java.util.HashMap;
+import java.util.Map;
 
 import javax.media.ClockStartedError;
 import javax.media.Manager;
 import javax.media.NoPlayerException;
 import javax.media.Player;
-import javax.tv.xlet.Xlet;
 import javax.tv.xlet.XletContext;
 import javax.tv.xlet.XletStateChangeException;
-import org.bluray.bdplus.StatusListener;
 
-public class Adapter extends LoaderAdapter implements BDJClassLoaderAdapter {
+import org.bluray.bdplus.StatusListener;
+import org.videolan.BDJClassFileTransformer;
+import org.videolan.BDJClassLoaderAdapter;
+import org.videolan.BDJXletContext;
+import org.videolan.Logger;
+
+public class Adapter implements BDJClassLoaderAdapter {
 
     public Map getHideClasses() {
         return null;
@@ -57,7 +51,7 @@ public class Adapter extends LoaderAdapter implements BDJClassLoaderAdapter {
     }
 
     public Map getXletClasses() {
-        return xletClasses;
+        return null;
     }
 
     public Adapter() throws ClassNotFoundException {
@@ -65,64 +59,30 @@ public class Adapter extends LoaderAdapter implements BDJClassLoaderAdapter {
         if (BDJXletContext.getCurrentContext() != null)
             throw new ClassNotFoundException();
 
-        /* relocate classes to avoid runtime package collisions */
+        final String source = "org/videolan/bdpluscompat/Adapter$MVSupport";
+        final String target = "com/macrovision/bdplus/MVSupport";
 
-        final String s1 = "org/videolan/mmbd/Adapter$Xlet";
-        final String s2 = "org/videolan/mmbd/Adapter$If";
-        Map m1 = new HashMap();
-        Map m2 = new HashMap();
-        Map m3 = new HashMap();
-        String d1, d2, d3;
-
-        try {
-            d1 = (new String(b0, "UTF-8") + new String(b1, "UTF-8"));
-            d2 = (new String(b0, "UTF-8") + new String(b2, "UTF-8"));
-            d3 = (new String(b0, "UTF-8") + new String(b3, "UTF-8"));
-            m1.put(s1, d1);
-            m2.put(s2, d2);
-            m3.put(s1, d3);
-        } catch (java.io.UnsupportedEncodingException uee) {
-            throw new ClassNotFoundException();
-        }
+        Map renameMap = new HashMap();
+        renameMap.put(source, target);
 
         BDJClassFileTransformer t = new BDJClassFileTransformer();
-        byte[] c1 = t.rename(loadBootClassCode(s1), m1);
-        byte[] c2 = t.rename(loadBootClassCode(s2), m2);
-        byte[] c3 = t.rename(loadBootClassCode(s1), m3);
-
-        if (c1 != null) {
+        byte[] code = t.rename(loadBootClassCode(source), renameMap);
+        if (code != null) {
             bootClasses = new HashMap();
-            bootClasses.put(d1.replace('/', '.'), c1);
-        }
-        if (c3 != null) {
-            if (bootClasses == null) {
-                bootClasses = new HashMap();
-            }
-            bootClasses.put(d3.replace('/', '.'), c3);
-        }
-        if (c2 != null) {
-            xletClasses = new HashMap();
-            xletClasses.put(d2.replace('/', '.'), c2);
+            bootClasses.put(target.replace('/', '.'), code);
         }
     }
 
-    public static abstract class If {
-        protected If() {}
-    }
-
-    public static class Xlet implements javax.tv.xlet.Xlet, StatusListener {
-        private static Xlet instance = new Xlet();
+    public static class MVSupport implements javax.tv.xlet.Xlet, StatusListener {
+        private static MVSupport instance = new MVSupport();
         private javax.tv.xlet.Xlet xlet = null;
         private XletContext ctx = null;
 
-        static private void log(String s) {
-            System.out.println(s);
-        }
         static private void error(String s) {
             System.err.println(s);
         }
 
-        public static Xlet initXlet(javax.tv.xlet.Xlet xlet, XletContext ctx) throws XletStateChangeException {
+        public static MVSupport initXlet(javax.tv.xlet.Xlet xlet, XletContext ctx) throws XletStateChangeException {
             if ((xlet == null) || (ctx == null)) {
                 error("initXlet: null argument");
                 throw new XletStateChangeException();
@@ -131,13 +91,12 @@ public class Adapter extends LoaderAdapter implements BDJClassLoaderAdapter {
                 error("initXlet: invalid arguments");
                 throw new XletStateChangeException();
             }
-            log("initXlet");
             instance.xlet = xlet;
             instance.ctx = ctx;
             return instance;
         }
 
-        public static Xlet lookup(XletContext ctx) {
+        public static MVSupport lookup(XletContext ctx) {
             return instance;
         }
 
@@ -162,7 +121,6 @@ public class Adapter extends LoaderAdapter implements BDJClassLoaderAdapter {
         }
 
         public boolean isAuthRequired() {
-            log("isAuthRequired");
             return false;
         }
 
@@ -170,7 +128,7 @@ public class Adapter extends LoaderAdapter implements BDJClassLoaderAdapter {
             doAuth(null);
         }
 
-        public synchronized void doAuth(If a) throws InterruptedException, RuntimeException {
+        public synchronized void doAuth(Object a) throws InterruptedException, RuntimeException {
             error("doAuth");
         }
 
@@ -183,7 +141,6 @@ public class Adapter extends LoaderAdapter implements BDJClassLoaderAdapter {
         public byte[] getMMV() {
             byte[] b = new byte[8];
             new java.util.Random().nextBytes(b);
-            log("getMMV");
             return b;
         }
 
@@ -210,15 +167,6 @@ public class Adapter extends LoaderAdapter implements BDJClassLoaderAdapter {
             p.close();
         }
     }
-
-    /*
-     * class loader
-     */
-
-    private final byte[] b0 = {99,111,109,47,109,97,99,114,111,118,105,115,105,111,110,47,98,100,112,108,117,115,47};
-    private final byte[] b1 = {77,86,67,111,109,109};
-    private final byte[] b2 = {83,116,114,101,101,116,76,111,99,107,71,101,116,116,101,114};
-    private final byte[] b3 = {77,86,83,117,112,112,111,114,116};
 
     private byte[] loadBootClassCode(String name) throws ClassNotFoundException {
         final String path = name.replace('.', '/').concat(".class");
@@ -268,7 +216,6 @@ public class Adapter extends LoaderAdapter implements BDJClassLoaderAdapter {
     }
 
     private Map bootClasses = new HashMap();
-    private Map xletClasses = new HashMap();
 
     private static final Logger logger = Logger.getLogger(Adapter.class.getName());
 }

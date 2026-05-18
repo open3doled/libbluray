@@ -26,6 +26,8 @@ import java.awt.image.BufferedImage;
 import java.security.AccessController;
 import java.security.PrivilegedAction;
 
+import org.havi.ui.HScene;
+import org.videolan.BDJDebug;
 import org.videolan.Logger;
 
 public class BDFramePeer extends BDComponentPeer implements FramePeer
@@ -170,10 +172,19 @@ public class BDFramePeer extends BDComponentPeer implements FramePeer
     //}
 
     public Graphics getGraphics() {
+        BDJDebug.traceGraphics(logger,
+                               "BDFramePeer.getGraphics rootWindow=" +
+                               Integer.toHexString(System.identityHashCode(rootWindow)) +
+                               " visible=" + rootWindow.isVisible() +
+                               " size=" + rootWindow.getWidth() + "x" + rootWindow.getHeight());
         return new BDWindowGraphics(rootWindow);
     }
 
     public Image createImage(int width, int height) {
+        BDJDebug.traceGraphics(logger,
+                               "BDFramePeer.createImage rootWindow=" +
+                               Integer.toHexString(System.identityHashCode(rootWindow)) +
+                               " size=" + width + "x" + height);
         return ((BDToolkit)BDToolkit.getDefaultToolkit()).createImage((Component)null, width, height);
     }
 
@@ -194,6 +205,34 @@ public class BDFramePeer extends BDComponentPeer implements FramePeer
         if (c == null) {
             return true;
         }
+        final BDKeyboardFocusManagerPeer kfmPeer =
+            (BDKeyboardFocusManagerPeer)BDKeyboardFocusManagerPeer.getInstance();
+        final HScene scene = findScene(c);
+        final Component oldFocusOwner = kfmPeer.getCurrentFocusOwner();
+
+        BDJDebug.traceScene(logger,
+                            "requestFocusHelper component=" + c +
+                            " oldFocusOwner=" + oldFocusOwner +
+                            " scene=" + scene);
+
+        if (oldFocusOwner != null && oldFocusOwner != c) {
+            final FocusEvent lostEvent = new FocusEvent(oldFocusOwner, FocusEvent.FOCUS_LOST);
+            AccessController.doPrivileged(
+                new PrivilegedAction() {
+                    public Object run() {
+                        Toolkit.getDefaultToolkit().getSystemEventQueue().postEvent(lostEvent);
+                        return null;
+                    }
+                });
+        }
+
+        kfmPeer.setCurrentFocusedWindow(rootWindow);
+        kfmPeer.setCurrentFocusOwner(c);
+
+        if (scene != null) {
+            scene.setActive(true);
+        }
+
         final FocusEvent focusEvent = new FocusEvent(c, FocusEvent.FOCUS_GAINED);
         AccessController.doPrivileged(
             new PrivilegedAction() {
@@ -203,6 +242,17 @@ public class BDFramePeer extends BDComponentPeer implements FramePeer
                 }
             });
         return true;
+    }
+
+    private HScene findScene(Component c) {
+        Component current = c;
+        while (current != null) {
+            if (current instanceof HScene) {
+                return (HScene)current;
+            }
+            current = current.getParent();
+        }
+        return null;
     }
 
     public void setVisible(boolean b) {

@@ -122,6 +122,8 @@ public class ImageFrameAccurateAnimation extends FrameAccurateAnimation
             logger.unimplemented("image_scaling");
         }
 
+        logger.error("TRACE animation: ImageFrameAccurateAnimation.prepareImages count=" +
+                     images.length + " entries=" + describeImageEntries());
         prepared = true;
     }
 
@@ -134,6 +136,9 @@ public class ImageFrameAccurateAnimation extends FrameAccurateAnimation
     public void setPosition(int position) {
         if (position < 0 || position >= images.length)
             throw new IllegalArgumentException();
+        logger.error("TRACE animation: ImageFrameAccurateAnimation.setPosition old=" +
+                     this.position + " new=" + position +
+                     " image=" + describeImageRef(images[position]));
         this.position = position;
     }
 
@@ -149,6 +154,9 @@ public class ImageFrameAccurateAnimation extends FrameAccurateAnimation
             prepareImages();
         }
 
+        logger.error("TRACE animation: ImageFrameAccurateAnimation.startImpl playmode=" +
+                     playmode + " position=" + position +
+                     " image=" + describeImageRef(images[position]));
         if (animation == null) {
             animation = new AnimationThread(this);
         }
@@ -163,6 +171,12 @@ public class ImageFrameAccurateAnimation extends FrameAccurateAnimation
 
     public void paint(Graphics g) {
         if (images != null && images[position] != null) {
+            if (lastTracedPaintPosition != position) {
+                logger.error("TRACE animation: ImageFrameAccurateAnimation.paint position=" +
+                             position + " image=" + describeImageRef(images[position]) +
+                             " bounds=" + super.getBounds());
+                lastTracedPaintPosition = position;
+            }
             if (!g.drawImage(images[position], super.getBounds().x, super.getBounds().y, this)) {
                 logger.warning("paint(" + position + ") failed");
             }
@@ -235,6 +249,10 @@ public class ImageFrameAccurateAnimation extends FrameAccurateAnimation
                     position = 1;
                     increment = 1;
                 }
+                logger.error("TRACE animation: ImageFrameAccurateAnimation.advance old=" +
+                             faa.position + " new=" + position +
+                             " increment=" + increment +
+                             " image=" + describeImageRef(faa.images[position]));
                 faa.position = position;
             }
 
@@ -253,8 +271,35 @@ public class ImageFrameAccurateAnimation extends FrameAccurateAnimation
     private boolean prepared = false;
     private Dimension size = null;
     private AnimationThread animation = null;
+    private transient int lastTracedPaintPosition = -1;
 
     private static final long serialVersionUID = 2691302238670178111L;
 
     private static final Logger logger = Logger.getLogger(FrameAccurateAnimation.class.getName());
+
+    private String describeImageEntries() {
+        StringBuilder sb = new StringBuilder();
+        int limit = Math.min(images.length, 6);
+        for (int i = 0; i < limit; i++) {
+            if (i > 0) {
+                sb.append(";");
+            }
+            sb.append(i).append("=").append(describeImageRef(images[i]));
+        }
+        if (images.length > limit) {
+            sb.append("+").append(images.length - limit).append("more");
+        }
+        return sb.toString();
+    }
+
+    private static String describeImageRef(Image image) {
+        if (image == null) {
+            return "null";
+        }
+        int width = image.getWidth(null);
+        int height = image.getHeight(null);
+        return image.getClass().getName() + "@" +
+               Integer.toHexString(System.identityHashCode(image)) +
+               " size=" + width + "x" + height;
+    }
 }

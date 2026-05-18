@@ -19,7 +19,10 @@
 
 package org.blurayx.s3d.ui;
 
+import org.videolan.Logger;
+
 public class S3DProperty {
+    private static final Logger LOG = Logger.getLogger("S3DTrace");
     public static final S3DProperty ONE_PLANE = new S3DProperty("ONE_PLANE");
     public static final S3DProperty TWO_PLANES = new S3DProperty("TWO_PLANES");
     public static final S3DProperty TWOD_OUTPUT = new S3DProperty("TWOD_OUTPUT");
@@ -28,6 +31,7 @@ public class S3DProperty {
 
     protected S3DProperty(String name) {
         this.name = name;
+        LOG.info("S3DProperty created name=" + name);
     }
 
     public String toString() {

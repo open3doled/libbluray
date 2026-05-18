@@ -141,6 +141,7 @@ class BDJAppProxy implements DVBJProxy, Runnable {
     }
 
     protected void release() {
+        BDJDebug.traceLifecycle(logger, "proxy release begin context=" + context + " cleanup=" + context.cleanupState());
         AppCommand cmd = new AppCommand(AppCommand.CMD_STOP, Boolean.valueOf(true));
         synchronized (cmds) {
             cmds.addLast(cmd);
@@ -152,7 +153,9 @@ class BDJAppProxy implements DVBJProxy, Runnable {
             logger.error("release(): STOP timeout, killing Xlet " + context.getThreadGroup().getName());
         }
 
+        BDJDebug.traceLifecycle(logger, "proxy release beforeContextRelease context=" + context + " cleanup=" + context.cleanupState());
         context.release();
+        BDJDebug.traceLifecycle(logger, "proxy release afterContextRelease context=" + context + " cleanup=" + context.cleanupState());
     }
 
     public void addAppStateChangeEventListener(AppStateChangeEventListener listener) {
@@ -231,8 +234,10 @@ class BDJAppProxy implements DVBJProxy, Runnable {
     private boolean doLoad() {
         if (state == NOT_LOADED) {
             try {
+                BDJDebug.traceLifecycle(logger, "proxy doLoad context=" + context);
                 xlet = ((BDJClassLoader)context.getClassLoader()).loadXlet();
                 state = LOADED;
+                BDJDebug.traceLifecycle(logger, "proxy doLoad success context=" + context + " xlet=" + xlet.getClass().getName());
                 return true;
             } catch (Throwable e) {
                 logger.error("doLoad() failed: " + e + "\n" + Logger.dumpStack(e));
@@ -247,10 +252,12 @@ class BDJAppProxy implements DVBJProxy, Runnable {
             return false;
         if (state == LOADED) {
             try {
+                BDJDebug.traceLifecycle(logger, "proxy doInit context=" + context);
                 createStorage();
 
                 xlet.initXlet(context);
                 state = PAUSED;
+                BDJDebug.traceLifecycle(logger, "proxy doInit success context=" + context);
                 return true;
             } catch (Throwable e) {
                 logger.error("doInit() failed: " + e + "\n" + Logger.dumpStack(e));
@@ -265,10 +272,12 @@ class BDJAppProxy implements DVBJProxy, Runnable {
             return false;
         if (state == PAUSED) {
             try {
+                BDJDebug.traceLifecycle(logger, "proxy doStart context=" + context + " args=" + (args == null ? 0 : args.length));
                 if (args != null)
                     context.setArgs(args);
                 xlet.startXlet();
                 state = STARTED;
+                BDJDebug.traceLifecycle(logger, "proxy doStart success context=" + context);
                 return true;
             } catch (Throwable e) {
                 logger.error("doStart() failed: " + e + "\n" + Logger.dumpStack(e));
@@ -278,26 +287,98 @@ class BDJAppProxy implements DVBJProxy, Runnable {
         return false;
     }
 
+    private String describeStopState(boolean force) {
+        BDJThreadGroup threadGroup = context.getThreadGroup();
+        String xletState = (xlet == null)
+            ? "<null>"
+            : xlet.getClass().getName() + "@" + Integer.toHexString(System.identityHashCode(xlet));
+
+        return "context=" + context +
+               " force=" + force +
+               " state=" + state +
+               " xlet=" + xletState +
+               " threads=" + (threadGroup == null ? -1 : threadGroup.activeCount()) +
+               " cleanup=" + context.cleanupState() +
+               " discStateSource=proxyContext" +
+               java.awt.BDJHelper.describeDiscStateForLoader(context.getClassLoader());
+    }
+
+    private void traceStopStep(String step, boolean force) {
+        BDJDebug.traceLifecycle(logger, "proxy doStop step=" + step + " " + describeStopState(force));
+    }
+
+    private boolean failStopStep(String step, boolean force, Throwable e) {
+        BDJDebug.traceLifecycle(logger, "proxy doStop failed step=" + step + " " + describeStopState(force));
+        logger.error("doStop(" + step + ") failed: " + e + "\n" + Logger.dumpStack(e));
+        if (!force) {
+            state = INVALID;
+            return false;
+        }
+        BDJDebug.traceLifecycle(logger, "proxy doStop continuing after failed step=" + step + " because force=true " + describeStopState(force));
+        return true;
+    }
+
+    private void noteStopFailure(String step, String[] firstFailedStep) {
+        if (firstFailedStep[0] == null) {
+            firstFailedStep[0] = step;
+        }
+    }
+
     private boolean doStop(boolean force) {
+        String[] firstFailedStep = new String[1];
+
         if (state == INVALID)
             return false;
         if ((state != NOT_LOADED) && (state != LOADED)) {
+            traceStopStep("begin", force);
             try {
+                traceStopStep("beforeDestroy", force);
                 xlet.destroyXlet(force);
-
-                context.closeSockets();
-                context.getThreadGroup().waitForShutdown(1000, 1 + context.numEventQueueThreads());
-
-                context.exitXlet();
-
+                traceStopStep("afterDestroy", force);
             } catch (Throwable e) {
-                logger.error("doStop() failed: " + e + "\n" + Logger.dumpStack(e));
-                state = INVALID;
-                return false;
+                if (!failStopStep("destroyXlet", force, e))
+                    return false;
+                noteStopFailure("destroyXlet", firstFailedStep);
             }
+
+            try {
+                traceStopStep("beforeCloseSockets", force);
+                context.closeSockets();
+                traceStopStep("afterCloseSockets", force);
+            } catch (Throwable e) {
+                if (!failStopStep("closeSockets", force, e))
+                    return false;
+                noteStopFailure("closeSockets", firstFailedStep);
+            }
+
+            int shutdownThreadAllowance = 1 + context.numEventQueueThreads();
+            try {
+                traceStopStep("beforeWaitForShutdown waitMs=1000 extraThreads=" + shutdownThreadAllowance, force);
+                context.getThreadGroup().waitForShutdown(1000, shutdownThreadAllowance);
+                traceStopStep("afterWaitForShutdown waitMs=1000 extraThreads=" + shutdownThreadAllowance, force);
+            } catch (Throwable e) {
+                if (!failStopStep("waitForShutdown", force, e))
+                    return false;
+                noteStopFailure("waitForShutdown", firstFailedStep);
+            }
+
+            try {
+                traceStopStep("beforeExitXlet", force);
+                context.exitXlet();
+            } catch (Throwable e) {
+                if (!failStopStep("exitXlet", force, e))
+                    return false;
+                noteStopFailure("exitXlet", firstFailedStep);
+            }
+            traceStopStep("afterExitXlet", force);
         }
         xlet = null;
         state = DESTROYED;
+        if (firstFailedStep[0] != null) {
+            traceStopStep("completedWithFailure firstFailedStep=" + firstFailedStep[0], force);
+            return false;
+        }
+        traceStopStep("success", force);
         return true;
     }
 
@@ -353,42 +434,51 @@ class BDJAppProxy implements DVBJProxy, Runnable {
             switch (cmd.getCommand()) {
             case AppCommand.CMD_LOAD:
                 toState = LOADED;
+                BDJDebug.traceLifecycle(logger, "proxy command LOAD from=" + fromState + " context=" + context);
                 ret = doLoad();
                 break;
             case AppCommand.CMD_INIT:
                 toState = PAUSED;
+                BDJDebug.traceLifecycle(logger, "proxy command INIT from=" + fromState + " context=" + context);
                 ret = doInit();
                 break;
             case AppCommand.CMD_START:
                 toState = STARTED;
+                BDJDebug.traceLifecycle(logger, "proxy command START from=" + fromState + " context=" + context);
                 Object args = cmd.getArgument();
                 ret = doStart(args == null ? null : (String[])args);
                 break;
             case AppCommand.CMD_STOP:
                 toState = DESTROYED;
+                BDJDebug.traceLifecycle(logger, "proxy command STOP from=" + fromState + " context=" + context);
                 ret = doStop(((Boolean)cmd.getArgument()).booleanValue());
                 break;
             case AppCommand.CMD_PAUSE:
                 toState = PAUSED;
+                BDJDebug.traceLifecycle(logger, "proxy command PAUSE from=" + fromState + " context=" + context);
                 ret = doPause();
                 break;
             case AppCommand.CMD_RESUME:
                 toState = STARTED;
+                BDJDebug.traceLifecycle(logger, "proxy command RESUME from=" + fromState + " context=" + context);
                 ret = doResume();
                 break;
             case AppCommand.CMD_NOTIFY_DESTROYED:
                 toState = DESTROYED;
+                BDJDebug.traceLifecycle(logger, "proxy command NOTIFY_DESTROYED from=" + fromState + " context=" + context);
                 state = DESTROYED;
                 ret = true;
                 break;
             case AppCommand.CMD_NOTIFY_PAUSED:
                 toState = PAUSED;
+                BDJDebug.traceLifecycle(logger, "proxy command NOTIFY_PAUSED from=" + fromState + " context=" + context);
                 state = PAUSED;
                 ret = true;
                 break;
             default:
                 return;
             }
+            BDJDebug.traceLifecycle(logger, "proxy command done from=" + fromState + " to=" + toState + " ret=" + ret + " state=" + state + " context=" + context);
             notifyListeners(fromState, toState, !ret);
             cmd.release();
             if (state == DESTROYED)

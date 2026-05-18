@@ -20,27 +20,40 @@
 package org.blurayx.s3d.ui;
 
 import org.havi.ui.HBackgroundConfigTemplate;
-import org.havi.ui.HBackgroundConfiguration;
+import org.videolan.Logger;
 
 public class HBackgroundConfigTemplateS3D extends HBackgroundConfigTemplate {
+    private static final Logger LOG = Logger.getLogger("S3DTrace");
 
     public static final int S3D = 17;
 
+    static {
+        LOG.info("HBackgroundConfigTemplateS3D class loaded");
+    }
+
+    public HBackgroundConfigTemplateS3D() {
+        LOG.info("HBackgroundConfigTemplateS3D instance created");
+    }
+
     protected int getPreferenceCount() {
+        LOG.info("HBackgroundConfigTemplateS3D.getPreferenceCount");
         return super.getPreferenceCount() + 1;
     }
 
     protected int getPreferenceObjectCount() {
+        LOG.info("HBackgroundConfigTemplateS3D.getPreferenceObjectCount");
         return super.getPreferenceObjectCount() + 1;
     }
 
     protected int getPreferenceIndex(int preference) {
+        LOG.info("HBackgroundConfigTemplateS3D.getPreferenceIndex preference=" + preference);
         if (preference == S3D)
             return super.getPreferenceCount();
         return super.getPreferenceIndex(preference);
     }
 
     protected int getPreferenceObjectIndex(int preference) {
+        LOG.info("HBackgroundConfigTemplateS3D.getPreferenceObjectIndex preference=" + preference);
         if (preference == S3D)
             return super.getPreferenceObjectCount();
         return super.getPreferenceObjectIndex(preference);

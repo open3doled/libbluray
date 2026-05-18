@@ -21,6 +21,10 @@
 #include "config.h"
 #endif
 
+#ifdef HAVE_DLADDR
+#  define _GNU_SOURCE  /* dladdr */
+#endif
+
 #include "register.h"
 
 #include "player_settings.h"
@@ -30,8 +34,22 @@
 #include "util/logging.h"
 #include "util/mutex.h"
 
+#if defined(HAVE_DLFCN_H)
+#   include <dlfcn.h>
+#elif defined(HAVE_SYS_DL_H)
+#   include <sys/dl.h>
+#endif
+
 #include <stdlib.h>
 #include <string.h>
+
+static int _open3d_trace_enabled(void)
+{
+    const char *global = getenv("OPEN3D_LIBBLURAY_TRACE");
+    const char *menu = getenv("OPEN3D_LIBBLURAY_TRACE_MENU");
+    return (global && global[0] && strcmp(global, "0") != 0) ||
+           (menu && menu[0] && strcmp(menu, "0") != 0);
+}
 
 /*
  * Initial values for player status/setting registers (5.8.2).
@@ -405,14 +423,57 @@ uint32_t bd_psr_read(BD_REGISTERS *p, unsigned int reg)
     return val;
 }
 
+static void _trace_title_write_caller(const char *label, void *caller)
+{
+    if (!_open3d_trace_enabled()) {
+        return;
+    }
+
+#if defined(__APPLE__) || defined(HAVE_DLADDR)
+    Dl_info dl_info;
+    int ret = dladdr(caller, &dl_info);
+    if (ret != 0) {
+        const char *obj = dl_info.dli_fname ? dl_info.dli_fname : "?";
+        const char *sym = dl_info.dli_sname ? dl_info.dli_sname : "?";
+        unsigned long long obj_off = (unsigned long long)((uintptr_t)caller - (uintptr_t)dl_info.dli_fbase);
+        unsigned long long sym_off = dl_info.dli_saddr
+            ? (unsigned long long)((uintptr_t)caller - (uintptr_t)dl_info.dli_saddr)
+            : 0;
+        BD_DEBUG(DBG_BLURAY | DBG_CRIT,
+                 "TRACE nativeTitle: %s addr=%p obj=%s obj_off=0x%llx sym=%s sym_off=0x%llx\n",
+                 label, caller, obj, obj_off, sym, sym_off);
+        return;
+    }
+#endif
+
+    BD_DEBUG(DBG_BLURAY | DBG_CRIT,
+             "TRACE nativeTitle: %s addr=%p\n",
+             label, caller);
+}
+
 int bd_psr_setting_write(BD_REGISTERS *p, unsigned int reg, uint32_t val)
 {
+    void *caller0 = NULL;
+
     if (reg >= BD_PSR_COUNT) {
         BD_DEBUG(DBG_BLURAY, "bd_psr_write(%d, %d): invalid register\n", reg, val);
         return -1;
     }
 
+#if defined(__GNUC__) || defined(__clang__)
+    caller0 = __builtin_extract_return_addr(__builtin_return_address(0));
+#endif
+
     bd_psr_lock(p);
+
+    if (reg == PSR_TITLE_NUMBER && _open3d_trace_enabled()) {
+        BD_DEBUG(DBG_BLURAY | DBG_CRIT,
+                 "TRACE nativeTitle: psrWriteCaller old=%u new=%u\n",
+                 p->psr[reg], val);
+        if (caller0) {
+            _trace_title_write_caller("psrWriteCaller0", caller0);
+        }
+    }
 
     if (p->psr[reg] == val) {
         BD_DEBUG(DBG_BLURAY, "bd_psr_write(%d, %d): no change in value\n", reg, val);

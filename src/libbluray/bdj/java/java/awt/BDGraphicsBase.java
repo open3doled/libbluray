@@ -37,12 +37,15 @@ import org.dvb.ui.UnsupportedDrawingOperationException;
 
 import sun.awt.ConstrainableGraphics;
 
+import org.videolan.BDJDebug;
 import org.videolan.GUIManager;
 import org.videolan.Logger;
 
 abstract class BDGraphicsBase extends DVBGraphics implements ConstrainableGraphics {
     private static final Color DEFAULT_COLOR = Color.BLACK;
     private static Font DEFAULT_FONT;
+    private static final int MAX_TRACE_CLIP_EVENTS = 64;
+    private static int traceClipEventCount;
 
     private int width;
     private int height;
@@ -57,6 +60,9 @@ abstract class BDGraphicsBase extends DVBGraphics implements ConstrainableGraphi
 
     /** The current xor color. If null then we are in paint mode. */
     private Color xorColor;
+
+    /** Bounded trace counter for low-level pixel writes. */
+    private int traceSpanCount;
 
     /** Translated X, Y offset from native offset. */
     private int originX;
@@ -280,6 +286,12 @@ abstract class BDGraphicsBase extends DVBGraphics implements ConstrainableGraphi
     }
 
     public void constrain(int x, int y, int w, int h) {
+        Rectangle clipBefore = clip == null ? null : new Rectangle(clip);
+        Rectangle constrainedBefore = constrainedRect == null ? null : new Rectangle(constrainedRect);
+        Rectangle actualBefore = actualClip == null ? null : new Rectangle(actualClip);
+        Rectangle arg = new Rectangle(x + originX, y + originY, w, h);
+        int originBeforeX = originX;
+        int originBeforeY = originY;
         originX += x;
         originY += y;
         Rectangle r = new Rectangle(originX, originY, w, h);
@@ -289,6 +301,8 @@ abstract class BDGraphicsBase extends DVBGraphics implements ConstrainableGraphi
             constrainedRect = r;
         }
         setupClip();
+        traceClipEvent("constrain", arg, clipBefore, constrainedBefore,
+                       actualBefore, originBeforeX, originBeforeY);
     }
 
     /** Returns a Shape object representing the clip. */
@@ -298,25 +312,48 @@ abstract class BDGraphicsBase extends DVBGraphics implements ConstrainableGraphi
 
     /** Crops the clipping rectangle. */
     public void clipRect(int x, int y, int w, int h) {
+        Rectangle clipBefore = clip == null ? null : new Rectangle(clip);
+        Rectangle constrainedBefore = constrainedRect == null ? null : new Rectangle(constrainedRect);
+        Rectangle actualBefore = actualClip == null ? null : new Rectangle(actualClip);
+        Rectangle arg = new Rectangle(x + originX, y + originY, w, h);
+        int originBeforeX = originX;
+        int originBeforeY = originY;
         Rectangle rect = new Rectangle(x + originX, y + originY, w, h);
         if (clip != null)
             clip = clip.intersection(rect);
         else
             clip = rect;
         setupClip();
+        traceClipEvent("clipRect", arg, clipBefore, constrainedBefore,
+                       actualBefore, originBeforeX, originBeforeY);
     }
 
     /** Sets the clipping rectangle. */
     public void setClip(int x, int y, int w, int h) {
+        Rectangle clipBefore = clip == null ? null : new Rectangle(clip);
+        Rectangle constrainedBefore = constrainedRect == null ? null : new Rectangle(constrainedRect);
+        Rectangle actualBefore = actualClip == null ? null : new Rectangle(actualClip);
+        Rectangle arg = new Rectangle(x + originX, y + originY, w, h);
+        int originBeforeX = originX;
+        int originBeforeY = originY;
         clip = new Rectangle (x + originX, y + originY, w, h);
         setupClip();
+        traceClipEvent("setClip", arg, clipBefore, constrainedBefore,
+                       actualBefore, originBeforeX, originBeforeY);
     }
 
     /** Sets the clip to a Shape (only Rectangle allowed). */
     public void setClip(Shape clip) {
         if (clip == null) {
+            Rectangle clipBefore = this.clip == null ? null : new Rectangle(this.clip);
+            Rectangle constrainedBefore = constrainedRect == null ? null : new Rectangle(constrainedRect);
+            Rectangle actualBefore = actualClip == null ? null : new Rectangle(actualClip);
+            int originBeforeX = originX;
+            int originBeforeY = originY;
             this.clip = null;
             setupClip();
+            traceClipEvent("setClipShape", null, clipBefore, constrainedBefore,
+                           actualBefore, originBeforeX, originBeforeY);
         } else if (clip instanceof Rectangle) {
             Rectangle rect = (Rectangle) clip;
             setClip(rect.x, rect.y, rect.width, rect.height);
@@ -336,6 +373,46 @@ abstract class BDGraphicsBase extends DVBGraphics implements ConstrainableGraphi
             actualClip = clip.intersection(rect);
         else
             actualClip = rect;
+    }
+
+    private static synchronized boolean takeClipTraceSlot() {
+        if (traceClipEventCount >= MAX_TRACE_CLIP_EVENTS) {
+            return false;
+        }
+        traceClipEventCount++;
+        return true;
+    }
+
+    private static String describeRect(Rectangle rect) {
+        if (rect == null) {
+            return "null";
+        }
+        return rect.x + "," + rect.y + " " + rect.width + "x" + rect.height;
+    }
+
+    private void traceClipEvent(String op, Rectangle arg,
+                                Rectangle clipBefore,
+                                Rectangle constrainedBefore,
+                                Rectangle actualBefore,
+                                int originBeforeX,
+                                int originBeforeY) {
+        if (!BDJDebug.graphicsEnabled() || !takeClipTraceSlot()) {
+            return;
+        }
+
+        BDJDebug.traceGraphics(logger,
+                               "BDGraphicsBase." + op +
+                               " target=" + traceTarget() +
+                               " arg=" + describeRect(arg) +
+                               " clipBefore=" + describeRect(clipBefore) +
+                               " clipAfter=" + describeRect(clip) +
+                               " constrainedBefore=" + describeRect(constrainedBefore) +
+                               " constrainedAfter=" + describeRect(constrainedRect) +
+                               " actualBefore=" + describeRect(actualBefore) +
+                               " actualAfter=" + describeRect(actualClip) +
+                               " originBefore=" + originBeforeX + "," + originBeforeY +
+                               " originAfter=" + originX + "," + originY +
+                               BDJDebug.callerSummary());
     }
 
     private int alphaBlend(int dest, int src) {
@@ -494,12 +571,32 @@ abstract class BDGraphicsBase extends DVBGraphics implements ConstrainableGraphi
     private void drawSpan(int x, int y, int length, int rgb) {
         x += originX;
         y += originY;
+        if (!(this instanceof BDWindowGraphics) && traceSpanCount < 8) {
+            BDJDebug.traceGraphics(logger,
+                                   "BDGraphicsBase.drawSpan target=" + traceTarget() +
+                                   " x=" + x +
+                                   " y=" + y +
+                                   " length=" + length +
+                                   " solid=" + Integer.toHexString(rgb));
+            traceSpanCount++;
+        }
         drawSpanN(x, y, length, rgb);
     }
 
     private void drawSpan(int x, int y, int length, int src[], int srcOffset, boolean flipX) {
         x += originX;
         y += originY;
+        if (!(this instanceof BDWindowGraphics) && traceSpanCount < 8) {
+            BDJDebug.traceGraphics(logger,
+                                   "BDGraphicsBase.drawSpan target=" + traceTarget() +
+                                   " x=" + x +
+                                   " y=" + y +
+                                   " length=" + length +
+                                   " srcOffset=" + srcOffset +
+                                   " flipX=" + flipX +
+                                   " array=" + (src == null ? "null" : ("len=" + src.length)));
+            traceSpanCount++;
+        }
         drawSpanN(x, y, length, src, srcOffset, flipX);
     }
 
@@ -528,6 +625,13 @@ abstract class BDGraphicsBase extends DVBGraphics implements ConstrainableGraphi
         if (rect.isEmpty() || backBuffer == null) {
             return;
         }
+        boolean trace = !(this instanceof BDWindowGraphics);
+        String geometryBefore = null;
+        String dirtyBefore = null;
+        if (trace) {
+            geometryBefore = traceGeometryState();
+            dirtyBefore = traceDirtyState();
+        }
         x = rect.x;
         y = rect.y;
         w = rect.width;
@@ -537,6 +641,17 @@ abstract class BDGraphicsBase extends DVBGraphics implements ConstrainableGraphi
             Arrays.fill(backBuffer, (y + i) * width + x, (y + i) * width + x + w, rgb);
 
         dirty.add(rect);
+        if (trace) {
+            BDJDebug.traceGraphics(logger,
+                                   "BDGraphicsBase.clearRect target=" + traceTarget() +
+                                   geometryBefore +
+                                   dirtyBefore +
+                                   " rect=" + rect.x + "," + rect.y +
+                                   " " + rect.width + "x" + rect.height +
+                                   " color=" + background +
+                                   " dirtyAfter=" + traceDirtyState() +
+                                   BDJDebug.callerSummary());
+        }
     }
 
     public void fillRect(int x, int y, int w, int h) {
@@ -544,6 +659,16 @@ abstract class BDGraphicsBase extends DVBGraphics implements ConstrainableGraphi
         y += originY;
         Rectangle rect = new Rectangle(x, y, w, h);
         rect = actualClip.intersection(rect);
+        if (rect.isEmpty() || backBuffer == null) {
+            return;
+        }
+        if (!(this instanceof BDWindowGraphics)) {
+            BDJDebug.traceGraphics(logger,
+                                   "BDGraphicsBase.fillRect target=" + traceTarget() +
+                                   " rect=" + rect.x + "," + rect.y +
+                                   " " + rect.width + "x" + rect.height +
+                                   " color=" + foreground);
+        }
         x = rect.x;
         y = rect.y;
         w = rect.width;
@@ -1182,6 +1307,13 @@ abstract class BDGraphicsBase extends DVBGraphics implements ConstrainableGraphi
     public void drawString(String string, int x, int y) {
         getFontMetrics();
         if (fontMetrics != null) {
+            if (!(this instanceof BDWindowGraphics)) {
+                BDJDebug.traceGraphics(logger,
+                                       "BDGraphicsBase.drawString target=" + traceTarget() +
+                                       " text=\"" + string + "\"" +
+                                       " at=" + x + "," + y +
+                                       " color=" + foreground);
+            }
             fontMetrics.drawString((BDGraphics)this, string, x, y, foreground.getRGB());
         } else {
             logger.error("drawString skipped: no font metrics. string=\"" + string + "\"");
@@ -1300,6 +1432,8 @@ abstract class BDGraphicsBase extends DVBGraphics implements ConstrainableGraphi
         if ((sw == 0) || (sh == 0) || (dw == 0) || (dh == 0))
             return false;
 
+        boolean trace = !(this instanceof BDWindowGraphics);
+
         BDImage bdImage;
         if (img instanceof BDImage) {
             bdImage = (BDImage)img;
@@ -1325,6 +1459,13 @@ abstract class BDGraphicsBase extends DVBGraphics implements ConstrainableGraphi
         if (dw < 0) dw = bdImage.width;
         if (dh < 0) dh = bdImage.height;
 
+        String geometryBefore = null;
+        String dirtyBefore = null;
+        if (trace) {
+            geometryBefore = traceGeometryState();
+            dirtyBefore = traceDirtyState();
+        }
+
         int   stride   = bdImage.width;
         int[] rgbArray = bdImage.getBdBackBuffer();
         int   bgColor  = 0;
@@ -1342,6 +1483,19 @@ abstract class BDGraphicsBase extends DVBGraphics implements ConstrainableGraphi
         if (dw != sw || dh != sh) {
             drawResizeBilinear(rgbArray, (sy * stride) + sx, stride, sw, sh,
                                dx, dy, dw, dh, flipX, flipY);
+            if (trace) {
+                BDJDebug.traceGraphics(logger,
+                                       "BDGraphicsBase.drawImageN target=" + traceTarget() +
+                                       geometryBefore +
+                                       dirtyBefore +
+                                       " image=" + describeImage(img, bdImage) +
+                                       " dst=" + dx + "," + dy + " " + dw + "x" + dh +
+                                       " src=" + sx + "," + sy + " " + sw + "x" + sh +
+                                       " flip=" + flipX + "/" + flipY +
+                                       " bg=" + bg +
+                                       " dirtyAfter=" + traceDirtyState() +
+                                       BDJDebug.callerSummary());
+            }
             return true;
         }
 
@@ -1354,6 +1508,20 @@ abstract class BDGraphicsBase extends DVBGraphics implements ConstrainableGraphi
             for (int i = 0; i < dh; i++) {
                 drawSpan(dx, dy + i, dw, rgbArray, (stride * (i + sy)) + sx, flipX);
             }
+        }
+
+        if (trace) {
+            BDJDebug.traceGraphics(logger,
+                                   "BDGraphicsBase.drawImageN target=" + traceTarget() +
+                                   geometryBefore +
+                                   dirtyBefore +
+                                   " image=" + describeImage(img, bdImage) +
+                                   " dst=" + dx + "," + dy + " " + dw + "x" + dh +
+                                   " src=" + sx + "," + sy + " " + sw + "x" + sh +
+                                   " flip=" + flipX + "/" + flipY +
+                                   " bg=" + bg +
+                                   " dirtyAfter=" + traceDirtyState() +
+                                   BDJDebug.callerSummary());
         }
 
         return true;
@@ -1524,6 +1692,46 @@ abstract class BDGraphicsBase extends DVBGraphics implements ConstrainableGraphi
 
     public String toString() {
         return getClass().getName() + "[" + originX + "," + originY + "]";
+    }
+
+    protected String traceGeometryState() {
+        return " origin=" + originX + "," + originY +
+               " size=" + width + "x" + height +
+               " clip=" + clip +
+               " constrained=" + constrainedRect +
+               " actualClip=" + actualClip;
+    }
+
+    protected String traceDirtyState() {
+        return " dirty=" + dirty;
+    }
+
+    private String traceTarget() {
+        return getClass().getName() + "@" +
+               Integer.toHexString(System.identityHashCode(this)) +
+               " origin=" + originX + "," + originY +
+               " size=" + width + "x" + height;
+    }
+
+    private static String describeImage(Image img, BDImage bdImage) {
+        if (img == null) {
+            return "null";
+        }
+        StringBuilder sb = new StringBuilder();
+        sb.append(img.getClass().getName())
+          .append("@")
+          .append(Integer.toHexString(System.identityHashCode(img)))
+          .append(" size=")
+          .append(bdImage.width)
+          .append("x")
+          .append(bdImage.height);
+        if (img instanceof BDImageConsumer) {
+            String source = ((BDImageConsumer)img).getDebugSource();
+            if (source != null) {
+                sb.append(" source=").append(source);
+            }
+        }
+        return sb.toString();
     }
 
     private static Image getBufferedImagePeer(BufferedImage image) {

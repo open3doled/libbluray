@@ -30,6 +30,7 @@ class BDImageConsumer extends BDImage implements ImageConsumer {
     private ImageProducer producer;
     private int status;
     private boolean started;
+    private String debugSource;
 
     public BDImageConsumer(ImageProducer producer) {
         super(null, -1, -1, null);
@@ -82,6 +83,14 @@ class BDImageConsumer extends BDImage implements ImageConsumer {
 
     public ImageProducer getSource() {
         return producer;
+    }
+
+    void setDebugSource(String debugSource) {
+        this.debugSource = debugSource;
+    }
+
+    String getDebugSource() {
+        return debugSource;
     }
 
     public void flush() {

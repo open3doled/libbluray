@@ -76,6 +76,26 @@ class BDJSockets {
         }
     }
 
+    protected synchronized String debugState() {
+        int openSockets = 0;
+        int closedSockets = 0;
+
+        for (Iterator it = sockets.iterator(); it.hasNext(); ) {
+            SocketImpl socketImpl = (SocketImpl)it.next();
+            Socket socket = getSocket(socketImpl);
+            if (socket != null && socket.isClosed()) {
+                closedSockets++;
+            } else {
+                openSockets++;
+            }
+        }
+
+        return "closed=" + closed +
+               " tracked=" + sockets.size() +
+               " open=" + openSockets +
+               " closedTracked=" + closedSockets;
+    }
+
     private Socket getSocket(SocketImpl socketImpl) {
         try {
             final SocketImpl si = socketImpl;

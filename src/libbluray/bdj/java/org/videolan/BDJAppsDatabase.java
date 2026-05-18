@@ -104,6 +104,9 @@ public class BDJAppsDatabase extends AppsDatabase {
             this.appProxys = appProxys;
             this.appTable = (bdjo != null) ? bdjo.getAppTable() : null;
         }
+        BDJDebug.traceLifecycle(logger, "appsDatabase.newDatabase fileAccessInfo=" +
+                                (bdjo != null ? bdjo.getFileAccessInfo() : "null") +
+                                " appCount=" + (appTable != null ? appTable.length : 0));
         notifyListeners(AppsDatabaseEvent.NEW_DATABASE, null);
     }
 
@@ -112,4 +115,5 @@ public class BDJAppsDatabase extends AppsDatabase {
     private AppEntry[] appTable = null;
 
     private static BDJAppsDatabase instance = null;
+    private static final Logger logger = Logger.getLogger(BDJAppsDatabase.class.getName());
 }

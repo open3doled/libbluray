@@ -107,4 +107,8 @@ public class TVTimerImpl extends TVTimer
         timer.cancel();
         scheduledTasks.clear();
     }
+
+    public synchronized String debugState() {
+        return "scheduledTasks=" + scheduledTasks.size();
+    }
 }

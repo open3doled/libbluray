@@ -319,12 +319,29 @@ public class Libbluray {
 
         /* get profile from PSR */
         int psr31 = readPSR(RegisterAccess.PSR_PLAYER_PROFILE);
+        int psr21 = readPSR(RegisterAccess.PSR_OUTPUT_MODE_PREFERENCE);
+        int psr22 = readPSR(RegisterAccess.PSR_3D_STATUS);
+        int psr23 = readPSR(RegisterAccess.PSR_DISPLAY_CAPABILITY);
+        int psr24 = readPSR(RegisterAccess.PSR_3D_CAPABILITY);
         int version = psr31 & 0xffff;
         int profile = psr31 >> 16;
         boolean p11 = (profile & 0x01) != 0;
         boolean p2  = (profile & 0x02) != 0;
         boolean p5  = (profile & 0x10) != 0;
         boolean p6  = ((profile & 0x1f) == 0) && (version >= 0x0300);
+        Logger.getLogger("Libbluray").info(
+            "TRACE s3d-init" +
+            " psr21=0x" + Integer.toHexString(psr21) +
+            " psr22=0x" + Integer.toHexString(psr22) +
+            " psr23=0x" + Integer.toHexString(psr23) +
+            " psr24=0x" + Integer.toHexString(psr24) +
+            " psr31=0x" + Integer.toHexString(psr31) +
+            " profileBits=0x" + Integer.toHexString(profile) +
+            " version=0x" + Integer.toHexString(version) +
+            " p11=" + p11 +
+            " p2=" + p2 +
+            " p5=" + p5 +
+            " p6=" + p6);
 
         resetProfile();
         if (!p6) {
@@ -397,6 +414,9 @@ public class Libbluray {
 
         loadAdapter(System.getProperty("org.videolan.loader.adapter"));
         loadAdapter(pkg);
+        if (classLoaderAdapter == null) {
+            loadAdapter("bdpluscompat");
+        }
 
         /* get title infos */
         titleInfos = getTitleInfosN(nativePointer);
@@ -480,6 +500,10 @@ public class Libbluray {
 
     protected static int setVirtualPackage(String vpPath, boolean initBackupRegs) {
         return setVirtualPackageN(nativePointer, vpPath, initBackupRegs);
+    }
+
+    public static String describeVirtualPackageGuard() {
+        return describeVirtualPackageGuardN(nativePointer);
     }
 
     /*
@@ -685,13 +709,35 @@ public class Libbluray {
      * Graphics
      */
 
+    public static final int IG_S3D_MODE_UNKNOWN = 0;
+    public static final int IG_S3D_MODE_TWOD_OUTPUT = 1;
+    public static final int IG_S3D_MODE_ONE_PLANE = 2;
+    public static final int IG_S3D_MODE_TWO_PLANES = 3;
+
+    public static void setGraphicsS3DState(int mode, boolean modeValid,
+                                           int offset, boolean offsetValid) {
+        BDJDebug.traceGraphics(Logger.getLogger("Libbluray"),
+                               "Libbluray.setGraphicsS3DState mode=" + mode +
+                               " modeValid=" + modeValid +
+                               " offset=" + offset +
+                               " offsetValid=" + offsetValid);
+        setGraphicsS3DStateN(nativePointer, mode, modeValid, offset, offsetValid);
+    }
+
     public static void updateGraphic(int width, int height, int[] rgbArray) {
+        BDJDebug.traceGraphics(Logger.getLogger("Libbluray"),
+                               "Libbluray.updateGraphic full size=" + width + "x" + height +
+                               " rgbNull=" + (rgbArray == null));
         updateGraphicN(nativePointer, width, height, rgbArray,
                        0, 0, width - 1, height - 1);
     }
 
     public static void updateGraphic(int width, int height, int[] rgbArray,
                                      int x0, int y0, int x1, int y1) {
+        BDJDebug.traceGraphics(Logger.getLogger("Libbluray"),
+                               "Libbluray.updateGraphic dirty size=" + width + "x" + height +
+                               " rgbNull=" + (rgbArray == null) +
+                               " rect=" + x0 + "," + y0 + "-" + x1 + "," + y1);
         updateGraphicN(nativePointer, width, height, rgbArray,
                        x0, y0, x1, y1);
     }
@@ -702,6 +748,7 @@ public class Libbluray {
 
     private static boolean startTitle(int titleNumber) {
         try {
+            BDJDebug.traceLifecycle(Logger.getLogger("Libbluray"), "startTitle title=" + titleNumber);
             BDLocator locator = new BDLocator(null, titleNumber, -1);
             Title title = (Title)SIManager.createInstance().getService(locator);
             if (title == null) {
@@ -721,6 +768,7 @@ public class Libbluray {
 
     private static boolean stopTitle(boolean shutdown) {
         try {
+            BDJDebug.traceLifecycle(Logger.getLogger("Libbluray"), "stopTitle shutdown=" + shutdown);
             TitleContext titleContext = (TitleContext)ServiceContextFactory.getInstance().getServiceContext(null);
             if (shutdown) {
                 titleContext.destroy();
@@ -738,6 +786,7 @@ public class Libbluray {
     private static boolean processEventImpl(int event, int param) {
         boolean result = true;
         int key = 0;
+        BDJDebug.traceLifecycle(Logger.getLogger("Libbluray"), "processEvent " + BDJDebug.formatEvent(event) + "(" + event + ") param=" + param);
 
         switch (event) {
 
@@ -888,11 +937,14 @@ public class Libbluray {
     private static native int writeRegN(long np, int is_psr, int num, int value, int psr_value_mask);
     private static native int readRegN(long np, int is_psr, int num);
     private static native int setVirtualPackageN(long np, String vpPath, boolean psrBackup);
+    private static native String describeVirtualPackageGuardN(long np);
     private static native int cacheBdRomFileN(long np, String path, String cachePath);
     private static native String[] listBdFilesN(long np, String path, boolean onlyBdRom);
     private static native Bdjo getBdjoN(long np, String name);
     private static native void updateGraphicN(long np, int width, int height, int[] rgbArray,
                                               int x0, int y0, int x1, int y1);
+    private static native void setGraphicsS3DStateN(long np, int mode, boolean modeValid,
+                                                    int offset, boolean offsetValid);
 
     private static long nativePointer = 0;
     private static TitleInfo[] titleInfos = null;

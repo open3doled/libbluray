@@ -38,6 +38,13 @@
 #include <string.h>
 #include <time.h>
 
+static int _open3d_trace_enabled(void)
+{
+    const char *global = getenv("OPEN3D_LIBBLURAY_TRACE");
+    const char *menu = getenv("OPEN3D_LIBBLURAY_TRACE_MENU");
+    return (global && global[0] && strcmp(global, "0") != 0) ||
+           (menu && menu[0] && strcmp(menu, "0") != 0);
+}
 
 typedef struct {
     time_t   time;
@@ -524,12 +531,22 @@ static int _resume_object(HDMV_VM *p, int psr_restore)
         /* check if suspended in play_pl */
         if (_suspended_at_play_pl(p)) {
             BD_DEBUG(DBG_HDMV, "resuming playlist playback\n");
+            if (_open3d_trace_enabled()) {
+                BD_DEBUG(DBG_HDMV | DBG_CRIT,
+                         "TRACE nativeTitle: hdmvResume restore_at_play_pl title=%u\n",
+                         bd_psr_read(p->regs, PSR_TITLE_NUMBER));
+            }
             p->playing_object = p->suspended_object;
             p->playing_pc     = p->suspended_pc;
             p->suspended_object = NULL;
             bd_psr_restore_state(p->regs);
 
             return 0;
+        }
+        if (_open3d_trace_enabled()) {
+            BD_DEBUG(DBG_HDMV | DBG_CRIT,
+                     "TRACE nativeTitle: hdmvResume restore_object title=%u\n",
+                     bd_psr_read(p->regs, PSR_TITLE_NUMBER));
         }
         bd_psr_restore_state(p->regs);
     }

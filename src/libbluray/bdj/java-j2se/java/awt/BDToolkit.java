@@ -30,6 +30,7 @@ import sun.awt.datatransfer.DataTransferer;
 import java.awt.peer.BDFramePeer;
 import java.awt.peer.BDKeyboardFocusManagerPeer;
 
+import org.videolan.BDJDebug;
 import org.videolan.GUIManager;
 import org.videolan.Logger;
 
@@ -72,7 +73,14 @@ public class BDToolkit extends BDToolkitBase
     }
 
     public void sync() {
-        GUIManager.getInstance().sync();
+        GUIManager gui = GUIManager.getInstance();
+        BDJDebug.traceGraphics(logger,
+                               "BDToolkit.sync gui@" +
+                               Integer.toHexString(System.identityHashCode(gui)) +
+                               " visible=" + gui.isVisible() +
+                               " components=" + gui.getComponentCount() +
+                               BDJDebug.callerSummary());
+        gui.sync();
     }
 
     public java.util.Map mapInputMethodHighlight(java.awt.im.InputMethodHighlight h) {

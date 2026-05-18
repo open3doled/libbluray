@@ -107,6 +107,11 @@ public class Handler extends BDHandler {
             currentLocator = null;
             pi = newPi;
 
+            System.err.println("TRACE playlistHandler phase=sourceSet path=setSource locator=" +
+                               _locatorString(sourceLocator) + " state=" + state +
+                               _traceContext() +
+                               " queue=" + commandQueue.debugState());
+
             baseMediaTime = 0;
             if (state == Prefetched)
                 doPrefetch();
@@ -163,6 +168,17 @@ public class Handler extends BDHandler {
                     piId = sourceLocator.getPlayItemId();
                 }
 
+                System.err.println("TRACE playlistHandler phase=doPrefetch source=" + _locatorString(sourceLocator) +
+                                   " current=" + _locatorString(currentLocator) +
+                                   " state=" + state +
+                                   _traceContext() +
+                                   " queue=" + commandQueue.debugState() +
+                                   " baseMediaTime=" + baseMediaTime +
+                                   " playlist=" + plId +
+                                   " playitem=" + piId +
+                                   " mark=" + mark +
+                                   " time=" + time);
+
                 if (!Libbluray.selectPlaylist(plId, piId, mark, time)) {
                     return new ConnectionErrorEvent(this);
                 }
@@ -174,6 +190,21 @@ public class Handler extends BDHandler {
                 return new ConnectionErrorEvent(this);
             }
             return super.doPrefetch();
+        }
+    }
+
+    protected void onPrefetchQueued() {
+        synchronized (this) {
+            queuedPrefetchPending = true;
+        }
+    }
+
+    protected void onPrefetchActionComplete(boolean success) {
+        synchronized (this) {
+            if (queuedPrefetchPending) {
+                queuedPrefetchPending = false;
+                notifyAll();
+            }
         }
     }
 
@@ -429,9 +460,21 @@ public class Handler extends BDHandler {
                 throw new ClockStartedError();
             }
 
+            while (queuedPrefetchPending) {
+                try {
+                    wait();
+                } catch (InterruptedException e) {
+                }
+            }
+
             this.pi = newPi;
             this.sourceLocator = locator;
             this.currentLocator = null;
+
+            System.err.println("TRACE playlistHandler phase=sourceSet path=selectPlayList locator=" +
+                               _locatorString(sourceLocator) + " state=" + state +
+                               _traceContext() +
+                               " queue=" + commandQueue.debugState());
 
             baseMediaTime = 0;
             if (state == Prefetched)
@@ -498,6 +541,23 @@ public class Handler extends BDHandler {
     private PlaylistInfo pi = null;
     private BDLocator currentLocator = null;
     private BDLocator sourceLocator = null;
+    private boolean queuedPrefetchPending = false;
+
+    private static String _locatorString(BDLocator locator) {
+        return locator != null ? locator.toExternalForm() : "<null>";
+    }
+
+    private static String _traceContext() {
+        return " thread=" + _traceThread();
+    }
+
+    private static String _traceThread() {
+        Thread thread = Thread.currentThread();
+        if (thread == null || thread.getName() == null) {
+            return "<unknown>";
+        }
+        return thread.getName();
+    }
 
     private static final Logger logger = Logger.getLogger(Handler.class.getName());
 }

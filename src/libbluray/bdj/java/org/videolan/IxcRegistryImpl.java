@@ -519,4 +519,26 @@ public class IxcRegistryImpl {
             }
         }
     }
+
+    public int countBindings(XletContext xc) {
+        if (xc == null) {
+            return 0;
+        }
+
+        String prefix = "/" + (String)xc.getXletProperty("dvb.org.id") + "/" +
+                        (String)xc.getXletProperty("dvb.app.id") + "/";
+        int count = 0;
+
+        synchronized (remoteObjects) {
+            Iterator it = remoteObjects.keySet().iterator();
+            while (it.hasNext()) {
+                String path = (String)it.next();
+                if (path.startsWith(prefix)) {
+                    count++;
+                }
+            }
+        }
+
+        return count;
+    }
 }

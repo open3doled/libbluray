@@ -22,6 +22,9 @@ package org.havi.ui;
 import java.awt.Color;
 import java.io.IOException;
 
+import org.videolan.BDJDebug;
+import org.videolan.Logger;
+
 public class HStillImageBackgroundConfiguration extends
         HBackgroundConfiguration {
     protected HStillImageBackgroundConfiguration() {
@@ -39,9 +42,30 @@ public class HStillImageBackgroundConfiguration extends
     public void displayImage(HBackgroundImage image, HScreenRectangle r)
             throws IOException, HPermissionDeniedException,
             HConfigurationException {
+        BDJDebug.traceGraphics(logger,
+                               "HStillImageBackgroundConfiguration.displayImage image=" +
+                               describeImage(image) +
+                               " rect=" + describeRect(r) +
+                               BDJDebug.callerSummary());
         org.videolan.Logger.unimplemented("HStillImageBackgroundConfiguration", "displayImage()");
         this.image = image;
         this.rect = r;
+    }
+
+    private static String describeImage(HBackgroundImage image) {
+        if (image == null) {
+            return "<null>";
+        }
+        return image.getClass().getName() +
+               "@" + Integer.toHexString(System.identityHashCode(image)) +
+               "[" + image.getWidth() + "x" + image.getHeight() + "]";
+    }
+
+    private static String describeRect(HScreenRectangle rect) {
+        if (rect == null) {
+            return "<null>";
+        }
+        return rect.x + "," + rect.y + " " + rect.width + "x" + rect.height;
     }
 
     protected HBackgroundImage getImage() {
@@ -54,4 +78,5 @@ public class HStillImageBackgroundConfiguration extends
 
     private HBackgroundImage image = null;
     private HScreenRectangle rect = new HScreenRectangle(0.0f, 0.0f, 1.0f, 1.0f);
+    private static final Logger logger = Logger.getLogger(HStillImageBackgroundConfiguration.class.getName());
 }

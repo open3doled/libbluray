@@ -22,11 +22,15 @@ package org.videolan.media.content.playlist;
 import java.awt.Component;
 import java.awt.Dimension;
 
+import org.dvb.media.ActiveFormatDescriptionChangedEvent;
+import org.dvb.media.AspectRatioChangedEvent;
+import org.dvb.media.DFCChangedEvent;
 import org.dvb.media.VideoFormatControl;
 import org.dvb.media.VideoFormatListener;
 import org.dvb.media.VideoTransformation;
 import org.havi.ui.HScreen;
 import org.havi.ui.HVideoConfiguration;
+import org.videolan.BDJListeners;
 import org.videolan.TIClip;
 
 public class VideoFormatControlImpl implements VideoFormatControl {
@@ -80,14 +84,24 @@ public class VideoFormatControlImpl implements VideoFormatControl {
     }
 
     public void addVideoFormatListener(VideoFormatListener listener) {
-        // TODO: implement
-        org.videolan.Logger.unimplemented("VideoFormatControlImpl", "addVideoFormatListener");
+        listeners.add(listener);
+        notifyCurrentFormatState();
     }
 
     public void removeVideoFormatListener(VideoFormatListener listener) {
-        // TODO: implement
+        listeners.remove(listener);
+    }
+
+    private void notifyCurrentFormatState() {
+        int aspectRatio = getAspectRatio();
+        if (aspectRatio != ASPECT_RATIO_UNKNOWN) {
+            listeners.putCallback(new AspectRatioChangedEvent(this, aspectRatio));
+        }
+        listeners.putCallback(new ActiveFormatDescriptionChangedEvent(this, getActiveFormatDefinition()));
+        listeners.putCallback(new DFCChangedEvent(this, getDecoderFormatConversion()));
     }
 
     private Handler player;
     private int dfc = DFC_PROCESSING_NONE;
+    private BDJListeners listeners = new BDJListeners();
 }

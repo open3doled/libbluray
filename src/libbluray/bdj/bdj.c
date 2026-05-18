@@ -917,6 +917,10 @@ static int _create_jvm(void *jvm_lib, const char *java_home, BDJ_CONFIG *cfg,
     option[n++].optionString = str_dup   ("-Dawt.toolkit=java.awt.BDToolkit");
     option[n++].optionString = str_dup   ("-Djava.awt.graphicsenv=java.awt.BDGraphicsEnvironment");
     option[n++].optionString = str_dup   ("-Djava.awt.headless=false");
+    if (getenv("LIBBLURAY_BDJ_LOADER_ADAPTER")) {
+        option[n++].optionString = str_printf("-Dorg.videolan.loader.adapter=%s",
+                                              getenv("LIBBLURAY_BDJ_LOADER_ADAPTER"));
+    }
     option[n++].optionString = str_dup   ("-Xms256M");
     option[n++].optionString = str_dup   ("-Xmx256M");
     option[n++].optionString = str_dup   ("-Xss2048k");

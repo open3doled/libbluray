@@ -21,6 +21,9 @@ package org.havi.ui;
 
 import java.awt.Color;
 
+import org.videolan.BDJDebug;
+import org.videolan.Logger;
+
 public class HBackgroundConfiguration extends HScreenConfiguration {
     protected HBackgroundConfiguration() {
     }
@@ -45,6 +48,10 @@ public class HBackgroundConfiguration extends HScreenConfiguration {
 
     public void setColor(Color color)
             throws HPermissionDeniedException, HConfigurationException {
+        logger.info("TRACE background-config op=setColor class=" + getClass().getName() +
+                    " old=" + this.color +
+                    " new=" + color +
+                    BDJDebug.callerSummary());
         if (color.getAlpha() < 255) {
             org.videolan.Logger.unimplemented("HBackgroundConfiguration", "setColor(alpha<255)");
             //throw new HConfigurationException();
@@ -54,4 +61,5 @@ public class HBackgroundConfiguration extends HScreenConfiguration {
 
     private HBackgroundConfigTemplate hbct;
     private Color color;
+    private static final Logger logger = Logger.getLogger(HBackgroundConfiguration.class.getName());
 }

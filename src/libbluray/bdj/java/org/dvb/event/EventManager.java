@@ -30,6 +30,7 @@ import org.davic.resources.ResourceServer;
 import org.davic.resources.ResourceStatusEvent;
 import org.davic.resources.ResourceStatusListener;
 import org.videolan.BDJAction;
+import org.videolan.BDJDebug;
 import org.videolan.BDJXletContext;
 import org.videolan.Logger;
 
@@ -152,6 +153,11 @@ public class EventManager implements ResourceServer {
         UserEvent ue = new UserEvent(this, 1, type, keyCode, modifiers, System.currentTimeMillis());
         BDJXletContext context = BDJXletContext.getFocusContext();
         boolean result = false;
+
+        BDJDebug.traceScene(logger,
+                            "receiveKeyEventN type=" + type +
+                            " keyCode=" + keyCode +
+                            " focusContext=" + context);
 
         if (context != null) {
             for (Iterator it = exclusiveAWTEventListener.iterator(); it.hasNext(); ) {

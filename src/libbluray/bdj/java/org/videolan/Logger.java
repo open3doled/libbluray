@@ -31,6 +31,19 @@ public class Logger {
         prop = System.getProperty("debug.trace");
         use_trace = (prop == null || !prop.equalsIgnoreCase("NO"));
 
+        use_open3d_trace =
+            isTruthy(System.getenv("OPEN3D_LIBBLURAY_TRACE")) ||
+            isTruthy(System.getenv("LIBBLURAY_BDJ_TRACE_LIFECYCLE")) ||
+            isTruthy(System.getenv("LIBBLURAY_BDJ_TRACE_SCENE")) ||
+            isTruthy(System.getenv("LIBBLURAY_BDJ_TRACE_GRAPHICS")) ||
+            isTruthy(System.getenv("LIBBLURAY_BDJ_TRACE_MEDIA_CLOCK")) ||
+            isTruthy(System.getenv("LIBBLURAY_BDJ_TRACE_GPR_NUM")) ||
+            isTruthy(System.getProperty("org.videolan.bdj.traceLifecycle")) ||
+            isTruthy(System.getProperty("org.videolan.bdj.traceScene")) ||
+            isTruthy(System.getProperty("org.videolan.bdj.traceGraphics")) ||
+            isTruthy(System.getProperty("org.videolan.bdj.traceMediaClock")) ||
+            isTruthy(System.getProperty("org.videolan.bdj.traceGprNum"));
+
         // capture stdout and stderr from on-disc applets
         // (those produce useful debug information sometimes)
         try {
@@ -95,11 +108,39 @@ public class Logger {
 
     private static native void logN(boolean error, String file, int line, String msg);
 
+    private static boolean isTruthy(String value) {
+        if (value == null) {
+            return false;
+        }
+        value = value.trim();
+        return value.equals("1") ||
+               value.equalsIgnoreCase("true") ||
+               value.equalsIgnoreCase("yes") ||
+               value.equalsIgnoreCase("on");
+    }
+
+    private static boolean shouldSuppressOpen3DTrace(String msg) {
+        if (use_open3d_trace || msg == null) {
+            return false;
+        }
+        return msg.startsWith("TRACE ") ||
+               msg.startsWith("INFO: TRACE ") ||
+               msg.startsWith("ERROR: TRACE ") ||
+               msg.startsWith("Ixc TRACE: ") ||
+               msg.startsWith("open3d_libbluray_mvc_diag:");
+    }
+
     private static void log(boolean error, String cls, String msg) {
+        if (shouldSuppressOpen3DTrace(msg)) {
+            return;
+        }
         logN(error, cls, 0, msg);
     }
 
     private static void log(boolean error, String msg) {
+        if (shouldSuppressOpen3DTrace(msg)) {
+            return;
+        }
         Location l = getLocation(3);
         logN(error, l.file + ":" + l.cls + "." + l.func, l.line, msg);
     }
@@ -187,4 +228,5 @@ public class Logger {
     private final String name;
     private static final boolean use_trace;
     private static final boolean use_throw;
+    private static final boolean use_open3d_trace;
 }

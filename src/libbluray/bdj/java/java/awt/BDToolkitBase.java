@@ -35,6 +35,8 @@ import sun.awt.image.ByteArrayImageSource;
 import sun.awt.image.FileImageSource;
 import sun.awt.image.URLImageSource;
 
+import org.videolan.BDJDebug;
+import org.videolan.BDJLoader;
 import org.videolan.BDJXletContext;
 import org.videolan.Logger;
 
@@ -87,6 +89,12 @@ abstract class BDToolkitBase extends Toolkit {
             logger.error("getGraphics(): not BDRootWindow");
             throw new Error("Not implemented");
         }
+        BDJDebug.traceGraphics(logger,
+                               "BDToolkitBase.getGraphics window=" + window.getClass().getName() +
+                               "@" + Integer.toHexString(System.identityHashCode(window)) +
+                               " visible=" + window.isVisible() +
+                               " size=" + window.getWidth() + "x" + window.getHeight() +
+                               BDJDebug.callerSummary());
         return new BDWindowGraphics((BDRootWindow)window);
     }
 
@@ -167,8 +175,21 @@ abstract class BDToolkitBase extends Toolkit {
             }
         }
 
+        String cacheFile = BDJLoader.getCachedFile(filename);
+        if (!cacheFile.equals(filename)) {
+            logger.info("createImage(): using cached " + cacheFile + " for " + filename);
+            filename = cacheFile;
+        }
+
+        BDJDebug.traceGraphics(logger,
+                               "BDToolkitBase.createImage file=" + filename);
+
         ImageProducer ip = new FileImageSource(filename);
         Image newImage = createImage(ip);
+        annotateImageSource(newImage, "file=" + filename);
+        BDJDebug.traceGraphics(logger,
+                               "BDToolkitBase.createImage file=" + filename +
+                               " image=" + describeImageRef(newImage));
         return newImage;
     }
 
@@ -176,8 +197,14 @@ abstract class BDToolkitBase extends Toolkit {
         if (BDJXletContext.getCurrentContext() == null) {
             logger.error("createImage(): no context " + Logger.dumpStack());
         }
+        BDJDebug.traceGraphics(logger,
+                               "BDToolkitBase.createImage url=" + url);
         ImageProducer ip = new URLImageSource(url);
         Image newImage = createImage(ip);
+        annotateImageSource(newImage, "url=" + url);
+        BDJDebug.traceGraphics(logger,
+                               "BDToolkitBase.createImage url=" + url +
+                               " image=" + describeImageRef(newImage));
         return newImage;
     }
 
@@ -191,6 +218,13 @@ abstract class BDToolkitBase extends Toolkit {
 
         ImageProducer ip = new ByteArrayImageSource(imagedata, imageoffset, imagelength);
         Image newImage = createImage(ip);
+        annotateImageSource(newImage,
+                            "bytes[offset=" + imageoffset +
+                            " length=" + imagelength + "]");
+        BDJDebug.traceGraphics(logger,
+                               "BDToolkitBase.createImage bytes offset=" + imageoffset +
+                               " length=" + imagelength +
+                               " image=" + describeImageRef(newImage));
         return newImage;
     }
 
@@ -198,10 +232,15 @@ abstract class BDToolkitBase extends Toolkit {
         if (BDJXletContext.getCurrentContext() == null) {
             logger.error("createImage(): no context " + Logger.dumpStack());
         }
-        return new BDImageConsumer(producer);
+        Image image = new BDImageConsumer(producer);
+        annotateImageSource(image, "producer=" + producer.getClass().getName());
+        return image;
     }
 
     public Image createImage(Component component, int width, int height) {
+        BDJDebug.traceGraphics(logger,
+                               "BDToolkitBase.createImage component=" + component +
+                               " size=" + width + "x" + height);
         return new BDImage(component, width, height, defaultGC);
     }
 
@@ -268,5 +307,19 @@ abstract class BDToolkitBase extends Toolkit {
 
         logger.warning("getSystemEventQueue(): no context   from:" + logger.dumpStack());
         return eventQueue;
+    }
+
+    private static void annotateImageSource(Image image, String source) {
+        if (image instanceof BDImageConsumer && source != null) {
+            ((BDImageConsumer)image).setDebugSource(source);
+        }
+    }
+
+    private static String describeImageRef(Image image) {
+        if (image == null) {
+            return "null";
+        }
+        return image.getClass().getName() + "@" +
+               Integer.toHexString(System.identityHashCode(image));
     }
 }

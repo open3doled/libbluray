@@ -22,6 +22,7 @@ package org.havi.ui;
 
 import org.blurayx.s3d.ui.HVideoConfigTemplateS3D;
 import org.blurayx.uhd.ui.HVideoConfigurationTemplateUHD;
+import org.videolan.Logger;
 
 public class HVideoDevice extends HScreenDevice {
     protected HVideoDevice() {
@@ -42,6 +43,10 @@ public class HVideoDevice extends HScreenDevice {
             hvcArray[i] = new HVideoConfiguration(hvct);
         }
         hvc = hvcArray[0];
+        logger.info("TRACE s3d-device device=video profile5=" + is_p5 +
+                    " profile6=" + is_p6 +
+                    " configCount=" + length +
+                    " sampleConfig=" + describeConfig(hvc));
     }
 
     public HVideoConfiguration[] getConfigurations() {
@@ -49,6 +54,8 @@ public class HVideoDevice extends HScreenDevice {
     }
 
     public HVideoConfiguration getDefaultConfiguration() {
+        logger.info("TRACE s3d-device device=video op=getDefaultConfiguration selected=" +
+                    describeConfig(hvcArray[0]));
         return hvcArray[0];
     }
 
@@ -58,6 +65,9 @@ public class HVideoDevice extends HScreenDevice {
         for (int i = 0; i < hvcArray.length; i++)
             if (hvct.match(hvcArray[i]) > score)
                 hvc = hvcArray[i];
+        logger.info("TRACE s3d-device device=video op=getBestConfiguration requestedTemplate=" +
+                    describeTemplate(hvct) +
+                    " selected=" + describeConfig(hvc));
         return hvc;
     }
 
@@ -68,15 +78,23 @@ public class HVideoDevice extends HScreenDevice {
             for (int j = 0; j < hvcta.length; j++)
                 if (hvcta[j].match(hvcArray[i]) > score)
                     hvc = hvcArray[i];
+        logger.info("TRACE s3d-device device=video op=getBestConfigurationArray requestedTemplates=" +
+                    describeTemplates(hvcta) +
+                    " selected=" + describeConfig(hvc));
         return hvc;
     }
 
     public HVideoConfiguration getCurrentConfiguration() {
+        logger.info("TRACE s3d-device device=video op=getCurrentConfiguration selected=" +
+                    describeConfig(hvc));
         return hvc;
     }
 
     public boolean setVideoConfiguration(HVideoConfiguration hvc)
             throws SecurityException, HPermissionDeniedException, HConfigurationException {
+        logger.info("TRACE s3d-device device=video op=setVideoConfiguration current=" +
+                    describeConfig(this.hvc) +
+                    " requested=" + describeConfig(hvc));
         this.hvc = hvc;
         return true;
     }
@@ -92,6 +110,40 @@ public class HVideoDevice extends HScreenDevice {
     }
 
     public static final HVideoConfiguration NOT_CONTRIBUTING = null;
+
+    private static String describeConfig(HVideoConfiguration config) {
+        if (config == null) {
+            return "<null>";
+        }
+        return config.getClass().getName() +
+               "{template=" + describeTemplate(config.getConfigTemplate()) +
+               "}";
+    }
+
+    private static String describeTemplate(HVideoConfigTemplate template) {
+        if (template == null) {
+            return "<null>";
+        }
+        return template.getClass().getName() +
+               "@" + Integer.toHexString(System.identityHashCode(template));
+    }
+
+    private static String describeTemplates(HVideoConfigTemplate[] templates) {
+        if (templates == null) {
+            return "<null>";
+        }
+        StringBuffer sb = new StringBuffer("[");
+        for (int i = 0; i < templates.length; i++) {
+            if (i > 0) {
+                sb.append(", ");
+            }
+            sb.append(describeTemplate(templates[i]));
+        }
+        sb.append("]");
+        return sb.toString();
+    }
+
     private HVideoConfiguration[] hvcArray;
     private HVideoConfiguration hvc;
+    private static final Logger logger = Logger.getLogger(HVideoDevice.class.getName());
 }

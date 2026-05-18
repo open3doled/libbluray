@@ -27,6 +27,8 @@ import java.util.ArrayList;
 
 import org.havi.ui.event.HBackgroundImageEvent;
 import org.havi.ui.event.HBackgroundImageListener;
+import org.videolan.BDJDebug;
+import org.videolan.Logger;
 
 public class HBackgroundImage implements ImageObserver {
     public HBackgroundImage(String filename) {
@@ -46,6 +48,10 @@ public class HBackgroundImage implements ImageObserver {
     }
 
    public void load(HBackgroundImageListener listener) {
+        BDJDebug.traceGraphics(logger,
+                               "HBackgroundImage.load image=" + describeSelf() +
+                               " listener=" + listener +
+                               BDJDebug.callerSummary());
         synchronized(listeners) {
             listeners.add(listener);
         }
@@ -66,6 +72,10 @@ public class HBackgroundImage implements ImageObserver {
 
     public boolean imageUpdate(Image img, int infoflags, int x, int y,
                                int width, int height) {
+        BDJDebug.traceGraphics(logger,
+                               "HBackgroundImage.imageUpdate image=" + describeSelf() +
+                               " flags=0x" + Integer.toHexString(infoflags) +
+                               " update=" + x + "," + y + " " + width + "x" + height);
         switch(infoflags) {
         case ImageObserver.ALLBITS:
         case ImageObserver.FRAMEBITS:
@@ -82,6 +92,12 @@ public class HBackgroundImage implements ImageObserver {
             return false;
         }
         return true;
+    }
+
+    private String describeSelf() {
+        return getClass().getName() +
+               "@" + Integer.toHexString(System.identityHashCode(this)) +
+               "[" + getWidth() + "x" + getHeight() + "]";
     }
 
     protected Image getImage() {
@@ -105,4 +121,5 @@ public class HBackgroundImage implements ImageObserver {
 
     private Image img;
     private ArrayList listeners = new ArrayList();
+    private static final Logger logger = Logger.getLogger(HBackgroundImage.class.getName());
 }

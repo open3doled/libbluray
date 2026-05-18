@@ -42,10 +42,37 @@ import org.bluray.ti.TitleImpl;
 import org.videolan.BDJLoader;
 import org.videolan.BDJLoaderCallback;
 import org.videolan.BDJListeners;
+import org.videolan.BDJDebug;
 import org.videolan.Logger;
 import org.videolan.media.content.PlayerManager;
 
 public class TitleContextImpl implements TitleContext {
+    private static boolean isTrackedTitle(Title title) {
+        if (!(title instanceof TitleImpl)) {
+            return false;
+        }
+        int titleNum = ((TitleImpl)title).getTitleNum();
+        return titleNum == 88 || titleNum == 86 || titleNum == 0;
+    }
+
+    private static String describeStartCallerStack() {
+        StackTraceElement[] e = new Exception("Stack trace").getStackTrace();
+        StringBuffer dump = new StringBuffer();
+        int count = 0;
+        for (int i = 2; i < e.length && count < 5; i++) {
+            String cls = e[i].getClassName();
+            if (cls.startsWith("org.videolan.Logger")) {
+                continue;
+            }
+            if (count > 0) {
+                dump.append(" <- ");
+            }
+            dump.append(e[i].toString());
+            count++;
+        }
+        return dump.toString();
+    }
+
     public Service getService() {
         return title;
     }
@@ -77,6 +104,14 @@ public class TitleContextImpl implements TitleContext {
     public void start(Title title, boolean restart) throws SecurityException {
         logger.info("start(" + title.getName() + ", restart=" + restart + ")");
 
+        if (isTrackedTitle(title)) {
+            BDJDebug.traceLifecycle(logger, "serviceContext.start title=" +
+                                    ((TitleImpl)title).getTitleNum() +
+                                    " restart=" + restart +
+                                    " callerStack=" + describeStartCallerStack() +
+                                    java.awt.BDJHelper.describeDiscState());
+        }
+
         SecurityManager sm = System.getSecurityManager();
         if (sm != null) {
             sm.checkPermission(new SelectPermission(title.getLocator(), "own"));
@@ -99,6 +134,16 @@ public class TitleContextImpl implements TitleContext {
 
     public void select(Service service) throws SecurityException {
         logger.info("select(" + service.getName() + ")");
+        if (service instanceof TitleImpl) {
+            BDJDebug.traceLifecycle(logger, "serviceContext.select title=" +
+                                    ((TitleImpl)service).getTitleNum() +
+                                    " locator=" + service.getLocator() +
+                                    java.awt.BDJHelper.describeDiscState());
+        } else {
+            BDJDebug.traceLifecycle(logger, "serviceContext.select service=" +
+                                    service.getName() +
+                                    " locator=" + service.getLocator());
+        }
         start((Title)service, true);
     }
 
@@ -171,11 +216,17 @@ public class TitleContextImpl implements TitleContext {
         }
 
         public void loaderDone(boolean succeed) {
+            BDJDebug.traceLifecycle(logger, "serviceContext.loaderDone title=" +
+                                    title.getTitleNum() + " succeed=" + succeed);
             if (succeed) {
                 context.title = title;
                 context.state = STATE_STARTED;
+                BDJDebug.traceLifecycle(logger, "serviceContext.postEvent event=NormalContentEvent title=" +
+                                        title.getTitleNum());
                 context.postEvent(new NormalContentEvent(context));
             } else {
+                BDJDebug.traceLifecycle(logger, "serviceContext.postEvent event=SelectionFailedEvent title=" +
+                                        title.getTitleNum());
                 context.postEvent(new SelectionFailedEvent(context, SelectionFailedEvent.OTHER));
             }
         }

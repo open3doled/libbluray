@@ -42,6 +42,7 @@ public abstract class HScreenConfigTemplate {
             throw new IllegalArgumentException("invalid preference");
         }
         priorityArray[index] = priority;
+        traceS3DPreference("setPreference-int", preference, null, priority);
     }
 
     public void setPreference(int preference, Object object, int priority) {
@@ -56,6 +57,7 @@ public abstract class HScreenConfigTemplate {
         }
         objectArray[index] = object;
         priorityArray[getPreferenceIndex(preference)] = priority;
+        traceS3DPreference("setPreference-object", preference, object, priority);
     }
 
     public int getPreferencePriority(int preference) {
@@ -73,7 +75,10 @@ public abstract class HScreenConfigTemplate {
             logger.error("invalid preference " + preference);
             throw new IllegalArgumentException("invalid preference");
         }
-        return objectArray[getPreferenceObjectIndex(preference)];
+        Object object = objectArray[getPreferenceObjectIndex(preference)];
+        traceS3DPreference("getPreferenceObject", preference, object,
+                           priorityArray[getPreferenceIndex(preference)]);
+        return object;
     }
 
     protected int getPreferenceCount() {
@@ -172,6 +177,27 @@ public abstract class HScreenConfigTemplate {
 
     private Object[] objectArray;
     private int[] priorityArray;
+
+    private void traceS3DPreference(String op, int preference, Object object, int priority) {
+        if (preference != 17) {
+            return;
+        }
+        logger.info("TRACE s3d-template op=" + op +
+                    " template=" + getClass().getName() +
+                    "@" + Integer.toHexString(System.identityHashCode(this)) +
+                    " preference=" + preference +
+                    " priority=" + priority +
+                    " object=" + describeObject(object));
+    }
+
+    private static String describeObject(Object object) {
+        if (object == null) {
+            return "null";
+        }
+        return object.getClass().getName() +
+               "@" + Integer.toHexString(System.identityHashCode(object)) +
+               "(" + object + ")";
+    }
 
     static int[][] defaultConfig = {
         { 1920, 1080, 16, 9 },

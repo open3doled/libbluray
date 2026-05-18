@@ -23,6 +23,7 @@ import java.util.Arrays;
 import java.util.Timer;
 import java.util.TimerTask;
 
+import org.videolan.BDJDebug;
 import org.videolan.Logger;
 import org.videolan.Libbluray;
 
@@ -59,6 +60,9 @@ public class BDRootWindow extends Frame {
 
 
     public void setBounds(int x, int y, int width, int height) {
+        BDJDebug.traceScene(logger,
+                            "BDRootWindow.setBounds visible=" + isVisible() +
+                            " bounds=" + x + "," + y + " " + width + "x" + height);
         if (!isVisible()) {
             if ((width > 0) && (height > 0)) {
                 if ((backBuffer == null) || (getWidth() * getHeight() < width * height)) {
@@ -90,6 +94,14 @@ public class BDRootWindow extends Frame {
     }
 
     public void notifyChanged() {
+        BDJDebug.traceScene(logger,
+                            "BDRootWindow.notifyChanged visible=" + isVisible() +
+                            " overlayOpen=" + overlay_open +
+                            " changeCount=" + changeCount);
+        BDJDebug.traceGraphics(logger,
+                               "BDRootWindow.notifyChanged visible=" + isVisible() +
+                               " overlayOpen=" + overlay_open +
+                               " changeCount=" + changeCount);
         if (!isVisible()) {
             logger.error("sync(): not visible");
             return;
@@ -125,6 +137,16 @@ public class BDRootWindow extends Frame {
             }
 
             Area a = dirty.getBoundsAndClear();
+            BDJDebug.traceScene(logger,
+                                "BDRootWindow.sync visible=" + isVisible() +
+                                " overlayOpen=" + overlay_open +
+                                " dirtyEmpty=" + a.isEmpty() +
+                                " size=" + getWidth() + "x" + getHeight());
+            BDJDebug.traceGraphics(logger,
+                                   "BDRootWindow.sync visible=" + isVisible() +
+                                   " overlayOpen=" + overlay_open +
+                                   " dirtyEmpty=" + a.isEmpty() +
+                                   " size=" + getWidth() + "x" + getHeight());
 
             if (!a.isEmpty()) {
                 if (!overlay_open) {
@@ -132,14 +154,24 @@ public class BDRootWindow extends Frame {
                     /* delay opening overlay until something has been drawn */
                     if (isBackBufferClear()) {
                         logger.info("sync() ignored (overlay not open, empty overlay)");
+                        BDJDebug.traceGraphics(logger,
+                                               "BDRootWindow.sync skip overlay-open empty-backbuffer");
                         return;
                     }
 
+                    BDJDebug.traceGraphics(logger,
+                                           "BDRootWindow.sync updateGraphic open-overlay size=" +
+                                           getWidth() + "x" + getHeight());
                     Libbluray.updateGraphic(getWidth(), getHeight(), null);
                     overlay_open = true;
                     a = new Area(getWidth(), getHeight()); /* force full plane update */
                 }
 
+                BDJDebug.traceGraphics(logger,
+                                       "BDRootWindow.sync updateGraphic dirty=" +
+                                       a.getX0() + "," + a.getY0() + "-" +
+                                       a.getX1() + "," + a.getY1() +
+                                       " size=" + getWidth() + "x" + getHeight());
                 Libbluray.updateGraphic(getWidth(), getHeight(), backBuffer,
                                         a.getX0(), a.getY0(), a.getX1(), a.getY1());
             }
@@ -168,6 +200,7 @@ public class BDRootWindow extends Frame {
     private void close() {
         synchronized (this) {
             if (overlay_open) {
+                BDJDebug.traceGraphics(logger, "BDRootWindow.close updateGraphic close-overlay");
                 Libbluray.updateGraphic(0, 0, null);
                 overlay_open = false;
             }
@@ -175,6 +208,11 @@ public class BDRootWindow extends Frame {
     }
 
     public void setVisible(boolean visible) {
+        BDJDebug.traceScene(logger,
+                            "BDRootWindow.setVisible visible=" + visible +
+                            " wasVisible=" + isVisible() +
+                            " size=" + getWidth() + "x" + getHeight() +
+                            " overlayOpen=" + overlay_open);
 
         super.setVisible(visible);
 

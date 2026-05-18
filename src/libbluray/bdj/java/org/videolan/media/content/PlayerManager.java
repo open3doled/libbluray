@@ -19,6 +19,7 @@
 package org.videolan.media.content;
 
 import java.util.ArrayList;
+import org.videolan.BDJDebug;
 import org.videolan.Logger;
 
 public class PlayerManager {
@@ -46,6 +47,7 @@ public class PlayerManager {
     private boolean stopping = false;
 
     public void releaseAllPlayers(boolean unconditional) {
+        BDJDebug.traceLifecycle(logger, "releaseAllPlayers unconditional=" + unconditional);
         BDHandler[] players = null;
         synchronized (registeredPlayers) {
             players = (BDHandler[])registeredPlayers.toArray(new BDHandler[0]);
@@ -67,6 +69,7 @@ public class PlayerManager {
     }
 
     protected void releaseResource(BDHandler player) {
+        BDJDebug.traceLifecycle(logger, "releaseResource player=" + player.getClass().getName());
         if (player instanceof org.videolan.media.content.playlist.Handler) {
             synchronized (playlistPlayerLock) {
                 if (player == playlistPlayer) {
@@ -86,6 +89,7 @@ public class PlayerManager {
     }
 
     protected boolean allocateResource(BDHandler player) {
+        BDJDebug.traceLifecycle(logger, "allocateResource player=" + player.getClass().getName());
         if (player instanceof org.videolan.media.content.playlist.Handler) {
             synchronized (stoppingLock) {
                 stopping = true;
@@ -94,6 +98,7 @@ public class PlayerManager {
                 if (playlistPlayer != null && player != playlistPlayer) {
 
                     logger.info("allocateResource(): Stopping old playlist player");
+                    BDJDebug.traceLifecycle(logger, "allocateResource stopping old playlist player=" + playlistPlayer.getClass().getName());
 
                     playlistPlayer.stop();
                     playlistPlayer.deallocate();
@@ -137,6 +142,7 @@ public class PlayerManager {
      */
 
     public boolean onEvent(int event, int param) {
+        BDJDebug.traceLifecycle(logger, "onEvent " + BDJDebug.formatEvent(event) + "(" + event + ") param=" + param + " stopping=" + stopping);
         synchronized (stoppingLock) {
             if (stopping) {
                 return false;

@@ -19,6 +19,7 @@
 
 package org.videolan;
 
+import java.awt.BDJHelper;
 import java.io.File;
 import java.io.InputStream;
 import java.io.InvalidObjectException;
@@ -131,6 +132,41 @@ public class BDJLoader {
         return path;
     }
 
+    public static String[] getCachedFiles(String path) {
+        VFSCache localCache = vfsCache;
+        if (localCache != null) {
+            return localCache.list(path);
+        }
+        return null;
+    }
+
+    public static boolean cacheVFSAssets(BUMFAsset[] assets) {
+        if (assets == null) {
+            return false;
+        }
+
+        VFSCache localCache = getVFSCache();
+        if (localCache == null) {
+            logger.error("cacheVFSAssets(): VFS cache is not available");
+            return false;
+        }
+
+        for (int i = 0; i < assets.length; i++) {
+            BUMFAsset asset = assets[i];
+            if (asset == null) {
+                logger.error("cacheVFSAssets(): null asset at index " + i);
+                return false;
+            }
+            if (!localCache.add(asset.getVpFile(), asset.getBudaFile())) {
+                logger.error("cacheVFSAssets(): failed to cache " +
+                             asset.getVpFile() + " <- " + asset.getBudaFile());
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     public static boolean load(TitleImpl title, boolean restart, BDJLoaderCallback callback) {
         // This method should be called only from ServiceContextFactory
 
@@ -167,17 +203,43 @@ public class BDJLoader {
         vfsCache = null;
     }
 
-    private static boolean loadN(TitleImpl title, boolean restart) {
+    private static VFSCache getVFSCache() {
+        VFSCache localCache = vfsCache;
+        if (localCache != null) {
+            return localCache;
+        }
 
-        if (vfsCache == null) {
-            vfsCache = VFSCache.createInstance();
+        synchronized (BDJLoader.class) {
+            if (vfsCache == null) {
+                vfsCache = VFSCache.createInstance();
+            }
+            return vfsCache;
+        }
+    }
+
+    private static boolean loadN(TitleImpl title, boolean restart) {
+        BDJDebug.traceLifecycle(logger, "loadN title=" + title.getTitleNum() +
+                                " restart=" + restart +
+                                BDJHelper.describeDiscState());
+
+        if (getVFSCache() == null) {
+            logger.error("loadN(): VFS cache is not available");
+            return false;
         }
 
         TitleInfo ti = title.getTitleInfo();
         if (!ti.isBdj()) {
             logger.info("Not BD-J title - requesting HDMV title start");
+            BDJDebug.traceLifecycle(logger, "loadN hdmvRedirect title=" +
+                                    title.getTitleNum() +
+                                    BDJHelper.describeDiscState());
             unloadN();
-            return Libbluray.selectHdmvTitle(title.getTitleNum());
+            boolean selected = Libbluray.selectHdmvTitle(title.getTitleNum());
+            BDJDebug.traceLifecycle(logger, "loadN hdmvRedirectResult title=" +
+                                    title.getTitleNum() +
+                                    " selected=" + selected +
+                                    BDJHelper.describeDiscState());
+            return selected;
         }
 
         try {
@@ -186,6 +248,7 @@ public class BDJLoader {
             if (bdjo == null)
                 throw new InvalidObjectException("bdjo not loaded");
             AppEntry[] appTable = bdjo.getAppTable();
+            BDJDebug.traceLifecycle(logger, "bdjo loaded title=" + title.getTitleNum() + " bdjo=" + ti.getBdjoName() + " appCount=" + appTable.length);
 
             // reuse appProxys
             BDJAppProxy[] proxys = new BDJAppProxy[appTable.length];
@@ -250,6 +313,7 @@ public class BDJLoader {
             }
 
             // initialize appProxys
+            boolean[] reusedProxy = new boolean[appTable.length];
             for (int i = 0; i < appTable.length; i++) {
                 if (proxys[i] == null) {
                     proxys[i] = BDJAppProxy.newInstance(new BDJXletContext(appTable[i], bdjo.getAppCaches(), gui));
@@ -262,6 +326,7 @@ public class BDJLoader {
                     }
                     logger.info("Loaded class: " + appTable[i].getInitialClass() + p + " from " + appTable[i].getBasePath() + ".jar");
                 } else {
+                    reusedProxy[i] = true;
                     proxys[i].getXletContext().update(appTable[i], bdjo.getAppCaches());
                     logger.info("Reused class: " + appTable[i].getInitialClass() +     " from " + appTable[i].getBasePath() + ".jar");
                 }
@@ -279,8 +344,12 @@ public class BDJLoader {
                 if ((plt != null) && (plt.isAutostartFirst())) {
                     logger.info("Auto-starting playlist");
                     String[] pl = plt.getPlayLists();
-                    if (pl.length > 0)
+                    if (pl.length > 0) {
+                        BDJDebug.traceLifecycle(logger, "autoplay playlist title=" + title.getTitleNum() + " playlist=" + pl[0]);
                         Manager.createPlayer(new MediaLocator(new BDLocator("bd://PLAYLIST:" + pl[0]))).start();
+                    } else {
+                        BDJDebug.traceLifecycle(logger, "autoplay requested but no playlists were listed");
+                    }
                 }
             } catch (Exception e) {
                 logger.error("loadN(): autoplaylist failed: " + e + "\n" + Logger.dumpStack(e));
@@ -289,18 +358,44 @@ public class BDJLoader {
             // now run all the xlets
             for (int i = 0; i < appTable.length; i++) {
                 int code = appTable[i].getControlCode();
+                int proxyState = proxys[i].getState();
                 if (code == AppEntry.AUTOSTART) {
+                    if (reusedProxy[i] && proxyState == BDJAppProxy.STARTED) {
+                        logger.info("Keeping running AUTOSTART xlet " + i + ": " + appTable[i].getInitialClass());
+                        BDJDebug.traceLifecycle(logger, "keeping running AUTOSTART xlet index=" + i +
+                                                " class=" + appTable[i].getInitialClass() +
+                                                " state=" + proxyState);
+                        continue;
+                    }
                     logger.info("Autostart xlet " + i + ": " + appTable[i].getInitialClass());
+                    BDJDebug.traceLifecycle(logger, "starting AUTOSTART xlet index=" + i +
+                                            " class=" + appTable[i].getInitialClass() +
+                                            " state=" + proxyState +
+                                            " reused=" + reusedProxy[i]);
                     proxys[i].start();
                 } else if (code == AppEntry.PRESENT) {
+                    if (reusedProxy[i] &&
+                        (proxyState == BDJAppProxy.STARTED || proxyState == BDJAppProxy.PAUSED)) {
+                        logger.info("Keeping initialized PRESENT xlet " + i + ": " + appTable[i].getInitialClass());
+                        BDJDebug.traceLifecycle(logger, "keeping initialized PRESENT xlet index=" + i +
+                                                " class=" + appTable[i].getInitialClass() +
+                                                " state=" + proxyState);
+                        continue;
+                    }
                     logger.info("Init xlet " + i + ": " + appTable[i].getInitialClass());
+                    BDJDebug.traceLifecycle(logger, "initializing PRESENT xlet index=" + i +
+                                            " class=" + appTable[i].getInitialClass() +
+                                            " state=" + proxyState +
+                                            " reused=" + reusedProxy[i]);
                     proxys[i].init();
                 } else {
                     logger.info("Unsupported xlet code (" +code+") xlet " + i + ": " + appTable[i].getInitialClass());
+                    BDJDebug.traceLifecycle(logger, "unsupported xlet code=" + code + " class=" + appTable[i].getInitialClass());
                 }
             }
 
             logger.info("Finished initializing and starting xlets.");
+            BDJDebug.traceLifecycle(logger, "loadN complete title=" + title.getTitleNum());
 
             return true;
 
@@ -313,6 +408,7 @@ public class BDJLoader {
 
     private static boolean unloadN() {
         try {
+            BDJDebug.traceLifecycle(logger, "unloadN begin");
             try {
                 GUIManager.getInstance().setVisible(false);
             } catch (Error e) {
@@ -326,6 +422,7 @@ public class BDJLoader {
                 AppID id = (AppID)ids.nextElement();
                 BDJAppProxy proxy = (BDJAppProxy)db.getAppProxy(id);
                 if (proxy != null) {
+                    BDJDebug.traceLifecycle(logger, "unloadN stop proxy=" + proxy.getXletContext());
                     proxy.stop(true);
                 }
             }
@@ -335,6 +432,7 @@ public class BDJLoader {
                 AppID id = (AppID)ids.nextElement();
                 BDJAppProxy proxy = (BDJAppProxy)db.getAppProxy(id);
                 if (proxy != null) {
+                    BDJDebug.traceLifecycle(logger, "unloadN release proxy=" + proxy.getXletContext());
                     proxy.release();
                 }
             }
@@ -342,6 +440,7 @@ public class BDJLoader {
             ((BDJAppsDatabase)db).newDatabase(null, null);
 
             PlayerManager.getInstance().releaseAllPlayers(true);
+            BDJDebug.traceLifecycle(logger, "unloadN complete");
 
             return true;
         } catch (Throwable e) {

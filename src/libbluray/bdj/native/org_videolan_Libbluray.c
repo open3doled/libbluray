@@ -39,6 +39,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <inttypes.h>
+#include <stdio.h>
 
 /* this automatically generated header is included to cross-check native function signatures */
 #include "org_videolan_Libbluray.h"
@@ -53,6 +54,74 @@
 #else
 #define CPP_EXTERN
 #endif
+
+static int _trace_graphics_enabled(void)
+{
+    const char *env = getenv("LIBBLURAY_BDJ_TRACE_GRAPHICS");
+    if (!env || !*env) {
+        return 0;
+    }
+    return strcmp(env, "0") != 0 &&
+           strcasecmp(env, "false") != 0 &&
+           strcasecmp(env, "no") != 0;
+}
+
+static int _open3d_trace_enabled(void)
+{
+    const char *global = getenv("OPEN3D_LIBBLURAY_TRACE");
+    const char *menu = getenv("OPEN3D_LIBBLURAY_TRACE_MENU");
+    return (global && global[0] && strcmp(global, "0") != 0) ||
+           (menu && menu[0] && strcmp(menu, "0") != 0);
+}
+
+static int _trace_sample_match(int width, int height, int x0, int y0, int x1, int y1)
+{
+    if (width != 1920 || height != 1080) {
+        return 0;
+    }
+
+    if (x0 == 0 && y0 == 0 && x1 == 1919 && y1 == 1079) {
+        return 1;
+    }
+
+    if (x0 == 396 && y0 == 888 && x1 == 1521 && y1 == 979) {
+        return 1;
+    }
+
+    return 0;
+}
+
+static unsigned _trace_sample_pixel(const unsigned *img, int width, int height, int x, int y)
+{
+    if (!img || x < 0 || y < 0 || x >= width || y >= height) {
+        return 0;
+    }
+
+    return img[y * width + x];
+}
+
+static void _trace_native_samples(const char *phase, const unsigned *img,
+                                  int width, int height, int x0, int y0, int x1, int y1)
+{
+    static unsigned count = 0;
+
+    if (!_trace_sample_match(width, height, x0, y0, x1, y1) || count >= 24) {
+        return;
+    }
+
+    count++;
+
+    BD_DEBUG(DBG_BDJ,
+             "TRACE graphics native samples phase=%s rect=%d,%d-%d,%d "
+             "p00=0x%08x p960x540=0x%08x p500x920=0x%08x p1000x920=0x%08x p1300x920=0x%08x\n",
+             phase ? phase : "?",
+             x0, y0, x1, y1,
+             _trace_sample_pixel(img, width, height, 0, 0),
+             _trace_sample_pixel(img, width, height, 960, 540),
+             _trace_sample_pixel(img, width, height, 500, 920),
+             _trace_sample_pixel(img, width, height, 1000, 920),
+             _trace_sample_pixel(img, width, height, 1300, 920));
+}
 
 /*
  * build org.videolan.TitleInfo
@@ -289,6 +358,26 @@ JNIEXPORT jint JNICALL Java_org_videolan_Libbluray_setVirtualPackageN(JNIEnv * e
     return result;
 }
 
+JNIEXPORT jstring JNICALL Java_org_videolan_Libbluray_describeVirtualPackageGuardN(JNIEnv * env,
+        jclass cls, jlong np) {
+    BLURAY* bd = (BLURAY*)(intptr_t)np;
+    char buf[192];
+    unsigned title = 0;
+    unsigned playlist = 0;
+    int title_type = -1;
+    int has_title = 0;
+    int can_set = 0;
+    int wait_start = 0;
+
+    bd_get_virtual_package_guard(bd, &can_set, &has_title, &title_type,
+                                 &wait_start, &title, &playlist);
+
+    snprintf(buf, sizeof(buf),
+             "nativeCanSetVp=%d nativeHasTitle=%d nativeTitleType=%d nativeWaitStart=%d nativePsrTitle=%u nativePsrPlaylist=%u",
+             can_set, has_title, title_type, wait_start, title, playlist);
+    return (*env)->NewStringUTF(env, buf);
+}
+
 JNIEXPORT jlong JNICALL Java_org_videolan_Libbluray_seekN(JNIEnv * env,
         jclass cls, jlong np, jint playitem, jint playmark, jlong tick) {
     BLURAY* bd = (BLURAY*)(intptr_t)np;
@@ -304,6 +393,12 @@ JNIEXPORT jint JNICALL Java_org_videolan_Libbluray_selectPlaylistN(
 
     if (!bd) {
         return 0;
+    }
+
+    if (_open3d_trace_enabled()) {
+        BD_DEBUG(DBG_BLURAY | DBG_CRIT,
+                 "TRACE jniSelectPlaylist playlist=%d playitem=%d playmark=%d time=%" PRId64 "\n",
+                 (int)playlist, (int)playitem, (int)playmark, (int64_t)time);
     }
 
     BD_DEBUG(DBG_JNI, "selectPlaylistN(pl=%d, pi=%d, pm=%d, time=%ld)\n",
@@ -502,9 +597,15 @@ static void _updateGraphic(JNIEnv * env,
         BLURAY *bd, jint width, jint height, jintArray rgbArray,
         jint x0, jint y0, jint x1, jint y1,
         BD_ARGB_BUFFER *buf) {
+    const int trace_graphics = _trace_graphics_enabled();
 
     /* close ? */
     if (!rgbArray) {
+        if (trace_graphics) {
+            BD_DEBUG(DBG_BDJ,
+                     "TRACE graphics native updateGraphic close size=%ldx%ld\n",
+                     (long)width, (long)height);
+        }
         bd_bdj_osd_cb(bd, NULL, (int)width, (int)height, 0, 0, 0, 0);
         return;
     }
@@ -587,6 +688,14 @@ static void _updateGraphic(JNIEnv * env,
             buf->unlock(buf);
         }
 
+        if (trace_graphics) {
+            BD_DEBUG(DBG_BDJ,
+                     "TRACE graphics native updateGraphic source=buffer size=%ldx%ld dirty=%ld,%ld-%ld,%ld\n",
+                     (long)width, (long)height,
+                     (long)x0, (long)y0, (long)x1, (long)y1);
+            _trace_native_samples("buffer", (const unsigned *)buf->buf[BD_OVERLAY_IG],
+                                  (int)width, (int)height, x0, y0, x1, y1);
+        }
         bd_bdj_osd_cb(bd, buf->buf[BD_OVERLAY_IG], (int)width, (int)height,
                       x0, y0, x1, y1);
 
@@ -596,6 +705,14 @@ static void _updateGraphic(JNIEnv * env,
 
         jint *image = (jint *)(*env)->GetPrimitiveArrayCritical(env, rgbArray, NULL);
         if (image) {
+            if (trace_graphics) {
+                BD_DEBUG(DBG_BDJ,
+                         "TRACE graphics native updateGraphic source=array size=%ldx%ld dirty=%ld,%ld-%ld,%ld\n",
+                         (long)width, (long)height,
+                         (long)x0, (long)y0, (long)x1, (long)y1);
+                _trace_native_samples("array", (const unsigned *)image,
+                                      (int)width, (int)height, x0, y0, x1, y1);
+            }
             bd_bdj_osd_cb(bd, (const unsigned *)image, (int)width, (int)height,
                           x0, y0, x1, y1);
             (*env)->ReleasePrimitiveArrayCritical(env, rgbArray, image, JNI_ABORT);
@@ -610,8 +727,17 @@ JNIEXPORT void JNICALL Java_org_videolan_Libbluray_updateGraphicN(JNIEnv * env,
         jint x0, jint y0, jint x1, jint y1) {
 
     BLURAY* bd = (BLURAY*)(intptr_t)np;
+    const int trace_graphics = _trace_graphics_enabled();
 
     BD_DEBUG(DBG_JNI, "updateGraphicN(%ld,%ld-%ld,%ld)\n", (long)x0, (long)y0, (long)x1, (long)y1);
+    if (trace_graphics) {
+        BD_DEBUG(DBG_BDJ,
+                 "TRACE graphics native updateGraphicN size=%ldx%ld rgbNull=%d rect=%ld,%ld-%ld,%ld bd=%p\n",
+                 (long)width, (long)height,
+                 rgbArray ? 0 : 1,
+                 (long)x0, (long)y0, (long)x1, (long)y1,
+                 (void *)bd);
+    }
 
     /* app callback not initialized ? */
     if (!bd) {
@@ -628,6 +754,26 @@ JNIEXPORT void JNICALL Java_org_videolan_Libbluray_updateGraphicN(JNIEnv * env,
     _updateGraphic(env, bd, width, height, rgbArray, x0, y0, x1, y1, buf);
 
     bd_unlock_osd_buffer(bd);
+}
+
+JNIEXPORT void JNICALL Java_org_videolan_Libbluray_setGraphicsS3DStateN(
+        JNIEnv * env, jclass cls, jlong np, jint mode, jboolean modeValid,
+        jint offset, jboolean offsetValid)
+{
+    BLURAY* bd = (BLURAY*)(intptr_t)np;
+
+    (void)env;
+    (void)cls;
+
+    BD_DEBUG(DBG_JNI,
+             "setGraphicsS3DStateN(mode=%ld modeValid=%d offset=%ld offsetValid=%d)\n",
+             (long)mode, modeValid ? 1 : 0,
+             (long)offset, offsetValid ? 1 : 0);
+    bd_set_ig_s3d_state(bd,
+                        modeValid ? 1 : 0,
+                        (int32_t)mode,
+                        offsetValid ? 1 : 0,
+                        (int32_t)offset);
 }
 
 #define CC (char*)(uintptr_t)  /* cast a literal from (const char*) */
@@ -687,6 +833,11 @@ Java_org_videolan_Libbluray_methods[] =
         VC(Java_org_videolan_Libbluray_setVirtualPackageN),
     },
     {
+        CC("describeVirtualPackageGuardN"),
+        CC("(J)Ljava/lang/String;"),
+        VC(Java_org_videolan_Libbluray_describeVirtualPackageGuardN),
+    },
+    {
         CC("selectAngleN"),
         CC("(JI)I"),
         VC(Java_org_videolan_Libbluray_selectAngleN),
@@ -736,9 +887,13 @@ Java_org_videolan_Libbluray_methods[] =
         CC("(JII[IIIII)V"),
         VC(Java_org_videolan_Libbluray_updateGraphicN),
     },
+    {
+        CC("setGraphicsS3DStateN"),
+        CC("(JIZIZ)V"),
+        VC(Java_org_videolan_Libbluray_setGraphicsS3DStateN),
+    },
 };
 
 BD_PRIVATE CPP_EXTERN const int
 Java_org_videolan_Libbluray_methods_count =
     sizeof(Java_org_videolan_Libbluray_methods)/sizeof(Java_org_videolan_Libbluray_methods[0]);
-

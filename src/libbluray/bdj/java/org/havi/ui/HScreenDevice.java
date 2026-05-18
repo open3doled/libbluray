@@ -33,7 +33,9 @@ import org.havi.ui.event.HScreenConfigurationListener;
 import org.havi.ui.event.HScreenDeviceReleasedEvent;
 import org.havi.ui.event.HScreenDeviceReservedEvent;
 
+import org.videolan.BDJDebug;
 import org.videolan.BDJXletContext;
+import org.videolan.Logger;
 
 public class HScreenDevice implements ResourceProxy, ResourceServer {
     HScreenDevice() {
@@ -70,14 +72,25 @@ public class HScreenDevice implements ResourceProxy, ResourceServer {
     }
 
     public boolean reserveDevice(ResourceClient client) {
-        if (this.client == client)
+        if (this.client == client) {
+            logger.info("TRACE screen-device op=reserveDevice reuse=true device=" +
+                        getClass().getName() +
+                        " client=" + describeClient(client) +
+                        " context=" + describeContext(BDJXletContext.getCurrentContext()) +
+                        BDJDebug.callerSummary());
             return true;
+        }
         if (this.client != null) {
             if (!this.client.requestRelease(this, null))
                 return false;
         }
         context = BDJXletContext.getCurrentContext();
         this.client = client;
+        logger.info("TRACE screen-device op=reserveDevice reuse=false device=" +
+                    getClass().getName() +
+                    " client=" + describeClient(client) +
+                    " context=" + describeContext(context) +
+                    BDJDebug.callerSummary());
         if (listener != null)
             listener.statusChanged(new HScreenDeviceReservedEvent(client));
         return true;
@@ -86,6 +99,11 @@ public class HScreenDevice implements ResourceProxy, ResourceServer {
     public void releaseDevice() {
         if (context != BDJXletContext.getCurrentContext())
             return;
+        logger.info("TRACE screen-device op=releaseDevice device=" +
+                    getClass().getName() +
+                    " client=" + describeClient(client) +
+                    " context=" + describeContext(context) +
+                    BDJDebug.callerSummary());
         if (listener != null)
             listener.statusChanged(new HScreenDeviceReleasedEvent(client));
         context = null;
@@ -118,4 +136,21 @@ public class HScreenDevice implements ResourceProxy, ResourceServer {
     private ResourceStatusListener listener = null;
     private XletContext context = null;
     private ResourceClient client = null;
+    private static final Logger logger = Logger.getLogger(HScreenDevice.class.getName());
+
+    private static String describeClient(ResourceClient client) {
+        if (client == null) {
+            return "<null>";
+        }
+        return client.getClass().getName() + "@" +
+               Integer.toHexString(System.identityHashCode(client));
+    }
+
+    private static String describeContext(XletContext context) {
+        if (context == null) {
+            return "<null>";
+        }
+        return context.getClass().getName() + "@" +
+               Integer.toHexString(System.identityHashCode(context));
+    }
 }

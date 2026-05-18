@@ -26,6 +26,8 @@ import org.dvb.media.VideoPresentationControl;
 import org.havi.ui.HScreen;
 import org.havi.ui.HScreenRectangle;
 import org.havi.ui.HVideoConfiguration;
+import org.videolan.BDJDebug;
+import org.videolan.Logger;
 import org.videolan.StreamInfo;
 
 public abstract class VideoControl extends StreamControl implements VideoPresentationControl {
@@ -73,7 +75,10 @@ public abstract class VideoControl extends StreamControl implements VideoPresent
     }
 
     protected void setVideoArea(HScreenRectangle rectangle) {
-        org.videolan.Logger.unimplemented("VideoControl", "setVideoArea");
+        logger.info("TRACE bgvideo-control class=" + getClass().getName() +
+                    " op=setVideoArea old=" + describeRect(dstArea) +
+                    " new=" + describeRect(rectangle) +
+                    BDJDebug.callerSummary());
         dstArea = rectangle;
         // TODO
     }
@@ -123,8 +128,11 @@ public abstract class VideoControl extends StreamControl implements VideoPresent
         else
             srcArea = new HScreenRectangle(0.0f, 0.0f, 1.0f, 1.0f);
 
-        //TODO
-        org.videolan.Logger.unimplemented("VideoControl", "setClipRegion");
+        logger.info("TRACE bgvideo-control class=" + getClass().getName() +
+                    " op=setClipRegion input=" + clipRect +
+                    " normalized=" + describeRect(srcArea) +
+                    " inputVideo=" + vd.width + "x" + vd.height +
+                    BDJDebug.callerSummary());
 
         return getRectangle(vd, srcArea);
     }
@@ -159,4 +167,12 @@ public abstract class VideoControl extends StreamControl implements VideoPresent
     //private int plane = 0;
     private HScreenRectangle srcArea = new HScreenRectangle(0.0f, 0.0f, 1.0f, 1.0f);
     private HScreenRectangle dstArea = new HScreenRectangle(0.0f, 0.0f, 1.0f, 1.0f);
+    private static final Logger logger = Logger.getLogger(VideoControl.class.getName());
+
+    private static String describeRect(HScreenRectangle rect) {
+        if (rect == null) {
+            return "<null>";
+        }
+        return rect.x + "," + rect.y + " " + rect.width + "x" + rect.height;
+    }
 }

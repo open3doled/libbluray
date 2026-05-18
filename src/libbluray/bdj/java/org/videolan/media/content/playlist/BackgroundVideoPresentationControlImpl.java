@@ -29,6 +29,8 @@ import org.dvb.media.BackgroundVideoPresentationControl;
 import org.dvb.media.VideoTransformation;
 import org.havi.ui.HScreenPoint;
 import org.havi.ui.HScreenRectangle;
+import org.videolan.BDJDebug;
+import org.videolan.Logger;
 import org.videolan.StreamInfo;
 import org.videolan.TIClip;
 
@@ -56,6 +58,11 @@ public class BackgroundVideoPresentationControlImpl extends VideoControl
     public boolean setVideoTransformation(VideoTransformation transform) {
         if (transform == null)
             return false;
+        logger.info("TRACE bgvideo-control class=" + getClass().getName() +
+                    " op=setVideoTransformation clip=" + transform.getClipRegion() +
+                    " pos=" + transform.getVideoPosition() +
+                    " scales=" + describeScales(transform.getScalingFactors()) +
+                    BDJDebug.callerSummary());
         setClipRegion(transform.getClipRegion());
         HScreenPoint pos = transform.getVideoPosition();
         float[] scales = transform.getScalingFactors();
@@ -80,10 +87,17 @@ public class BackgroundVideoPresentationControlImpl extends VideoControl
             xscale = rect.width * sd.width / vd.width;
             yscale = rect.height * sd.height / vd.height;
         }
-        return new VideoTransformation(
+        VideoTransformation transform = new VideoTransformation(
                                        getClipRegion(),
                                        xscale, yscale,
                                        new HScreenPoint(rect.x, rect.y));
+        logger.info("TRACE bgvideo-control class=" + getClass().getName() +
+                    " op=getVideoTransformation active=" + rect.x + "," + rect.y +
+                    " " + rect.width + "x" + rect.height +
+                    " scales=" + xscale + "," + yscale +
+                    " clip=" + getClipRegion() +
+                    BDJDebug.callerSummary());
+        return transform;
     }
 
     public VideoTransformation getClosestMatch(VideoTransformation transform) {
@@ -91,17 +105,27 @@ public class BackgroundVideoPresentationControlImpl extends VideoControl
     }
 
     public AWTVideoSize getSize() {
-        return new AWTVideoSize(
+        AWTVideoSize size = new AWTVideoSize(
                                 getClipRegion(),
                                 getRectangle(getScreenSize(), getActiveVideoArea()));
+        logger.info("TRACE bgvideo-control class=" + getClass().getName() +
+                    " op=getSize source=" + size.getSource() +
+                    " destination=" + size.getDestination() +
+                    BDJDebug.callerSummary());
+        return size;
     }
 
     public AWTVideoSize getDefaultSize() {
         Dimension vd = getInputVideoSize();
         Dimension sd = getScreenSize();
-        return new AWTVideoSize(
+        AWTVideoSize size = new AWTVideoSize(
                                 new Rectangle(vd.width, vd.height),
                                 new Rectangle(sd.width, sd.height));
+        logger.info("TRACE bgvideo-control class=" + getClass().getName() +
+                    " op=getDefaultSize source=" + size.getSource() +
+                    " destination=" + size.getDestination() +
+                    BDJDebug.callerSummary());
+        return size;
     }
 
     public Dimension getSourceVideoSize() {
@@ -109,12 +133,18 @@ public class BackgroundVideoPresentationControlImpl extends VideoControl
     }
 
     public boolean setSize(AWTVideoSize size) {
+        logger.info("TRACE bgvideo-control class=" + getClass().getName() +
+                    " op=setSize source=" + size.getSource() +
+                    " destination=" + size.getDestination() +
+                    BDJDebug.callerSummary());
         setClipRegion(size.getSource());
         setVideoArea(getNormalizedRectangle(getScreenSize(), size.getDestination()));
         return true;
     }
 
     public AWTVideoSize checkSize(AWTVideoSize size) {
+        Rectangle requestedSource = new Rectangle(size.getSource());
+        Rectangle requestedDestination = new Rectangle(size.getDestination());
         Dimension vd = getInputVideoSize();
         Rectangle sr = size.getSource();
         if (sr.x < 0)
@@ -136,8 +166,27 @@ public class BackgroundVideoPresentationControlImpl extends VideoControl
             }
         }
         Rectangle dr = size.getDestination();
-        return new AWTVideoSize(sr, dr);
+        AWTVideoSize checked = new AWTVideoSize(sr, dr);
+        logger.info("TRACE bgvideo-control class=" + getClass().getName() +
+                    " op=checkSize requestSource=" + requestedSource +
+                    " requestDestination=" + requestedDestination +
+                    " resultSource=" + checked.getSource() +
+                    " resultDestination=" + checked.getDestination() +
+                    BDJDebug.callerSummary());
+        return checked;
     }
 
     private Handler player;
+    private static final Logger logger =
+        Logger.getLogger(BackgroundVideoPresentationControlImpl.class.getName());
+
+    private static String describeScales(float[] scales) {
+        if (scales == null) {
+            return "null";
+        }
+        if (scales.length < 2) {
+            return "[" + scales.length + "]";
+        }
+        return scales[0] + "," + scales[1];
+    }
 }

@@ -127,4 +127,13 @@ public class IxcRegistry {
     public static void unbindAll(XletContext xc) {
         getIxcRegistry().unbindAll(xc);
     }
+
+    public static int debugCountBindings(XletContext xc) {
+        synchronized (instanceLock) {
+            if (registry == null) {
+                return 0;
+            }
+            return registry.countBindings(xc);
+        }
+    }
 }

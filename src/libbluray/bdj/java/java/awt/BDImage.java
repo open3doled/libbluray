@@ -35,6 +35,9 @@ import java.awt.image.ImageObserver;
 import java.awt.image.ColorModel;
 import java.awt.image.BufferedImage;
 
+import org.videolan.BDJDebug;
+import org.videolan.Logger;
+
 import sun.awt.image.BufferedImagePeer;
 
 class BDImage extends Image implements BufferedImagePeer {
@@ -98,7 +101,16 @@ class BDImage extends Image implements BufferedImagePeer {
     }
 
     public Graphics getGraphics() {
-        return new BDGraphics(this);
+        Graphics g = new BDGraphics(this);
+        BDJDebug.traceGraphics(logger,
+                               "BDImage.getGraphics image@" +
+                               Integer.toHexString(System.identityHashCode(this)) +
+                               " graphics@" +
+                               Integer.toHexString(System.identityHashCode(g)) +
+                               " component=" + component +
+                               " size=" + width + "x" + height +
+                               BDJDebug.callerSummary());
+        return g;
     }
 
     public int getWidth() {
@@ -254,4 +266,6 @@ class BDImage extends Image implements BufferedImagePeer {
         BDImage image = new BDImage(null, w, h, gc);
         return createBuffededImage(image);
     }
+
+    private static final Logger logger = Logger.getLogger(BDImage.class.getName());
 }

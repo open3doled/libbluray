@@ -71,6 +71,32 @@ typedef enum {
     title_bdj,
 } BD_TITLE_TYPE;
 
+static int _trace_bdj_graphics_enabled(void)
+{
+    const char *env = getenv("LIBBLURAY_BDJ_TRACE_GRAPHICS");
+    if (!env || !*env) {
+        return 0;
+    }
+    return strcmp(env, "0") != 0 &&
+           strcasecmp(env, "false") != 0 &&
+           strcasecmp(env, "no") != 0;
+}
+
+static int _open3d_env_truthy(const char *name)
+{
+    const char *env = getenv(name);
+    return env && *env &&
+           strcmp(env, "0") != 0 &&
+           strcasecmp(env, "false") != 0 &&
+           strcasecmp(env, "no") != 0;
+}
+
+static int _open3d_trace_enabled(const char *name)
+{
+    return _open3d_env_truthy("OPEN3D_LIBBLURAY_TRACE") ||
+           (name && _open3d_env_truthy(name));
+}
+
 typedef struct {
     /* current clip */
     const NAV_CLIP *clip;
@@ -151,6 +177,7 @@ typedef struct {
     uint8_t                dep_seek_pending;
     uint32_t               dep_seek_pkt;
     uint32_t               dep_seek_time;
+    uint8_t                ensure_failure_logged;
     uint8_t                dep_int_buf[6144];
 } BD_OPEN3D_MVC_RUNTIME;
 
@@ -212,6 +239,11 @@ struct bluray {
     BDJAVA         *bdjava;
     BDJ_CONFIG      bdj_config;
     uint8_t         bdj_wait_start;  /* BD-J has selected playlist (prefetch) but not yet started playback */
+    uint8_t         bdj_ig_s3d_mode_valid;
+    uint8_t         bdj_ig_s3d_offset_valid;
+    int32_t         bdj_ig_s3d_mode;
+    int32_t         bdj_ig_s3d_offset;
+    uint64_t        bdj_ig_s3d_epoch;
 
     /* HDMV graphics */
     GRAPHICS_CONTROLLER *graphics_controller;
@@ -235,6 +267,7 @@ static void _close_m2ts(BD_STREAM *st);
 static int  _open_m2ts(BLURAY *bd, BD_STREAM *st);
 static int  _read_block(BLURAY *bd, BD_STREAM *st, uint8_t *buf);
 static void _open3d_mvc_trace(const char *fmt, ...);
+static void _open3d_mvc_runtime_diag(const char *fmt, ...);
 static int _open3d_mvc_contains_nal_type(const uint8_t *buf, uint32_t len,
                                          uint8_t nal_type);
 static int64_t _seek_stream(BLURAY *bd, BD_STREAM *st,
@@ -303,11 +336,206 @@ const char *bd_event_name(uint32_t event)
     return NULL;
 }
 
+static int _open3d_trace_menu_event(uint32_t event)
+{
+    switch ((bd_event_e)event) {
+        case BD_EVENT_TITLE:
+        case BD_EVENT_PLAYLIST_STOP:
+        case BD_EVENT_DISCONTINUITY:
+        case BD_EVENT_SEEK:
+        case BD_EVENT_POPUP:
+        case BD_EVENT_MENU:
+        case BD_EVENT_STILL:
+        case BD_EVENT_KEY_INTEREST_TABLE:
+            return 1;
+        default:
+            return 0;
+    }
+}
+
+static const char *_open3d_gc_ctrl_name(gc_ctrl_e msg)
+{
+    switch (msg) {
+        case GC_CTRL_INIT_MENU:       return "INIT_MENU";
+        case GC_CTRL_NOP:             return "NOP";
+        case GC_CTRL_RESET:           return "RESET";
+        case GC_CTRL_VK_KEY:          return "VK_KEY";
+        case GC_CTRL_MOUSE_MOVE:      return "MOUSE_MOVE";
+        case GC_CTRL_ENABLE_BUTTON:   return "ENABLE_BUTTON";
+        case GC_CTRL_DISABLE_BUTTON:  return "DISABLE_BUTTON";
+        case GC_CTRL_SET_BUTTON_PAGE: return "SET_BUTTON_PAGE";
+        case GC_CTRL_POPUP:           return "POPUP";
+        case GC_CTRL_IG_END:          return "IG_END";
+        case GC_CTRL_PG_UPDATE:       return "PG_UPDATE";
+        case GC_CTRL_PG_RESET:        return "PG_RESET";
+        case GC_CTRL_PG_CHARCODE:     return "PG_CHARCODE";
+        case GC_CTRL_STYLE_SELECT:    return "STYLE_SELECT";
+        default:                      return "UNKNOWN";
+    }
+}
+
+static void _open3d_trace_gc_run(BLURAY *bd, gc_ctrl_e msg, uint32_t param,
+                                 int result, uint32_t prev_status,
+                                 const GC_NAV_CMDS *cmds)
+{
+    if (!_open3d_trace_enabled("OPEN3D_LIBBLURAY_TRACE_MENU") || !bd || !cmds) {
+        return;
+    }
+
+    if (msg != GC_CTRL_INIT_MENU && cmds->status == prev_status) {
+        return;
+    }
+
+    BD_DEBUG(DBG_BLURAY | DBG_CRIT,
+             "TRACE gcRun msg=%s(%d) param=%u result=%d prev_status=0x%08x cmds_status=0x%08x num_nav_cmds=%d sound_id_ref=%d title_type=%d psr_title=%u psr_playlist=%u hdmv_suspended=%u\n",
+             _open3d_gc_ctrl_name(msg), (int)msg, param, result,
+             prev_status, cmds->status, cmds->num_nav_cmds, cmds->sound_id_ref,
+             bd->title_type,
+             bd->regs ? bd_psr_read(bd->regs, PSR_TITLE_NUMBER) : 0,
+             bd->regs ? bd_psr_read(bd->regs, PSR_PLAYLIST) : 0,
+             bd->hdmv_suspended);
+}
+
+static void _open3d_trace_ig_init(BLURAY *bd, const char *phase,
+                                  uint16_t ig_pid, int ig_subpath,
+                                  unsigned ig_subclip, int result)
+{
+    if (!_open3d_trace_enabled("OPEN3D_LIBBLURAY_TRACE_MENU") || !bd || !phase) {
+        return;
+    }
+
+    BD_DEBUG(DBG_BLURAY | DBG_CRIT,
+             "TRACE igInit phase=%s result=%d ig_pid=0x%04x ig_subpath=%d ig_subclip=%u st_ig_clip=%d st0_ig_pid=0x%04x title_type=%d psr_title=%u psr_playlist=%u gc_status=0x%08x hdmv_suspended=%u\n",
+             phase, result, ig_pid, ig_subpath, ig_subclip,
+             bd->st_ig.clip ? 1 : 0, bd->st0.ig_pid, bd->title_type,
+             bd->regs ? bd_psr_read(bd->regs, PSR_TITLE_NUMBER) : 0,
+             bd->regs ? bd_psr_read(bd->regs, PSR_PLAYLIST) : 0,
+             bd->gc_status, bd->hdmv_suspended);
+}
+
+static int _open3d_trace_hdmv_event_enabled(HDMV_EVENT *hev)
+{
+    if (!_open3d_trace_enabled("OPEN3D_LIBBLURAY_TRACE_MENU") || !hev) {
+        return 0;
+    }
+
+    switch (hev->event) {
+        case HDMV_EVENT_TITLE:
+        case HDMV_EVENT_PLAY_PL:
+        case HDMV_EVENT_PLAY_PL_PI:
+        case HDMV_EVENT_PLAY_PL_PM:
+        case HDMV_EVENT_PLAY_PI:
+        case HDMV_EVENT_PLAY_PM:
+        case HDMV_EVENT_PLAY_STOP:
+        case HDMV_EVENT_STILL:
+        case HDMV_EVENT_POPUP_OFF:
+        case HDMV_EVENT_IG_END:
+            return 1;
+        default:
+            return 0;
+    }
+}
+
+static void _open3d_trace_hdmv_event(BLURAY *bd, HDMV_EVENT *hev)
+{
+    if (!bd || !_open3d_trace_hdmv_event_enabled(hev)) {
+        return;
+    }
+
+    BD_DEBUG(DBG_BLURAY | DBG_CRIT,
+             "TRACE hdmvEvent event=%s(%d) param=%u param2=%u title_type=%d psr_title=%u psr_playlist=%u gc_status=0x%08x hdmv_suspended=%u\n",
+             hdmv_event_str(hev->event), hev->event, hev->param, hev->param2,
+             bd->title_type,
+             bd->regs ? bd_psr_read(bd->regs, PSR_TITLE_NUMBER) : 0,
+             bd->regs ? bd_psr_read(bd->regs, PSR_PLAYLIST) : 0,
+             bd->gc_status, bd->hdmv_suspended);
+}
+
+static void _open3d_trace_menu_event_queue(BLURAY *bd, const char *phase,
+                                           uint32_t event, uint32_t param)
+{
+    if (!_open3d_trace_enabled("OPEN3D_LIBBLURAY_TRACE_MENU") ||
+        !bd || !phase || !_open3d_trace_menu_event(event)) {
+        return;
+    }
+
+    BD_DEBUG(DBG_BLURAY | DBG_CRIT,
+             "TRACE menuEventQueue phase=%s event=%s(%u) param=%u title_type=%d psr_title=%u psr_playlist=%u gc_status=0x%08x bdj_wait_start=%u hdmv_suspended=%u\n",
+             phase,
+             bd_event_name(event) ? bd_event_name(event) : "?",
+             event,
+             param,
+             bd->title_type,
+             bd->regs ? bd_psr_read(bd->regs, PSR_TITLE_NUMBER) : 0,
+             bd->regs ? bd_psr_read(bd->regs, PSR_PLAYLIST) : 0,
+             bd->gc_status,
+             bd->bdj_wait_start,
+             bd->hdmv_suspended);
+}
+
+static void _open3d_trace_close_playlist(BLURAY *bd, const char *reason)
+{
+    int clip_ref = -1;
+    unsigned clip_count = 0;
+
+    if (!_open3d_trace_enabled("OPEN3D_LIBBLURAY_TRACE_MENU") || !bd || !reason) {
+        return;
+    }
+
+    if (bd->title) {
+        clip_count = bd->title->clip_list.count;
+    }
+    if (bd->st0.clip) {
+        clip_ref = bd->st0.clip->ref;
+    }
+
+    BD_DEBUG(DBG_BLURAY | DBG_CRIT,
+             "TRACE closePlaylist reason=%s title_type=%d psr_title=%u psr_playlist=%u clip_ref=%d clip_count=%u bdj_wait_start=%u hdmv_suspended=%u\n",
+             reason,
+             bd->title_type,
+             bd->regs ? bd_psr_read(bd->regs, PSR_TITLE_NUMBER) : 0,
+             bd->regs ? bd_psr_read(bd->regs, PSR_PLAYLIST) : 0,
+             clip_ref, clip_count, bd->bdj_wait_start, bd->hdmv_suspended);
+}
+
+static void _open3d_trace_psr_restore(BLURAY *bd, const char *stage,
+                                      uint32_t psr_idx, uint32_t old_val,
+                                      uint32_t new_val)
+{
+    if (!_open3d_trace_enabled("OPEN3D_LIBBLURAY_TRACE_MENU") || !bd || !stage) {
+        return;
+    }
+
+    BD_DEBUG(DBG_BLURAY | DBG_CRIT,
+             "TRACE psrRestore stage=%s psr_idx=%u old=%u new=%u title_type=%d psr_title=%u psr_playlist=%u bdj_wait_start=%u hdmv_suspended=%u\n",
+             stage, psr_idx, old_val, new_val, bd->title_type,
+             bd->regs ? bd_psr_read(bd->regs, PSR_TITLE_NUMBER) : 0,
+             bd->regs ? bd_psr_read(bd->regs, PSR_PLAYLIST) : 0,
+             bd->bdj_wait_start, bd->hdmv_suspended);
+}
+
+static void _open3d_trace_open_playlist_request(BLURAY *bd, const char *reason,
+                                                unsigned playlist, unsigned angle)
+{
+    if (!_open3d_trace_enabled("OPEN3D_LIBBLURAY_TRACE_MENU") || !bd || !reason) {
+        return;
+    }
+
+    BD_DEBUG(DBG_BLURAY | DBG_CRIT,
+             "TRACE openPlaylistRequest reason=%s playlist=%u angle=%u title_type=%d psr_title=%u psr_playlist=%u bdj_wait_start=%u hdmv_suspended=%u\n",
+             reason, playlist, angle, bd->title_type,
+             bd->regs ? bd_psr_read(bd->regs, PSR_TITLE_NUMBER) : 0,
+             bd->regs ? bd_psr_read(bd->regs, PSR_PLAYLIST) : 0,
+             bd->bdj_wait_start, bd->hdmv_suspended);
+}
+
 static int _get_event(BLURAY *bd, BD_EVENT *ev)
 {
     int result = event_queue_get(bd->event_queue, ev);
     if (!result) {
         ev->event = BD_EVENT_NONE;
+    } else {
+        _open3d_trace_menu_event_queue(bd, "get", ev->event, ev->param);
     }
     return result;
 }
@@ -321,6 +549,8 @@ static int _queue_event(BLURAY *bd, uint32_t event, uint32_t param)
         if (!result) {
             const char *name = bd_event_name(event);
             BD_DEBUG(DBG_BLURAY|DBG_CRIT, "_queue_event(%s:%d, %d): queue overflow !\n", name ? name : "?", event, param);
+        } else {
+            _open3d_trace_menu_event_queue(bd, "put", event, param);
         }
     }
     return result;
@@ -1085,6 +1315,225 @@ static uint16_t _open3d_pick_dependent_pid_from_clip(const NAV_CLIP *clip)
     return 0;
 }
 
+static void _open3d_mvc_describe_dependent_clip(const NAV_CLIP *clip,
+                                                unsigned *out_num_prog,
+                                                int *out_first_nonempty_prog,
+                                                unsigned *out_first_nonempty_streams,
+                                                uint16_t *out_first_stream_pid,
+                                                uint16_t *out_first_0x20_pid)
+{
+    unsigned ii;
+
+    if (out_num_prog) {
+        *out_num_prog = 0;
+    }
+    if (out_first_nonempty_prog) {
+        *out_first_nonempty_prog = -1;
+    }
+    if (out_first_nonempty_streams) {
+        *out_first_nonempty_streams = 0;
+    }
+    if (out_first_stream_pid) {
+        *out_first_stream_pid = 0;
+    }
+    if (out_first_0x20_pid) {
+        *out_first_0x20_pid = 0;
+    }
+
+    if (!clip || !clip->cl) {
+        return;
+    }
+
+    if (out_num_prog) {
+        *out_num_prog = clip->cl->program_ss.num_prog;
+    }
+
+    for (ii = 0; ii < clip->cl->program_ss.num_prog; ii++) {
+        const CLPI_PROG *prog = &clip->cl->program_ss.progs[ii];
+        unsigned jj;
+        uint16_t first_0x20_pid = 0;
+
+        if (prog->num_streams == 0) {
+            continue;
+        }
+
+        for (jj = 0; jj < prog->num_streams; jj++) {
+            if (prog->streams[jj].coding_type == 0x20) {
+                first_0x20_pid = prog->streams[jj].pid;
+                break;
+            }
+        }
+
+        if (out_first_nonempty_prog) {
+            *out_first_nonempty_prog = (int)ii;
+        }
+        if (out_first_nonempty_streams) {
+            *out_first_nonempty_streams = prog->num_streams;
+        }
+        if (out_first_stream_pid) {
+            *out_first_stream_pid = prog->streams[0].pid;
+        }
+        if (out_first_0x20_pid) {
+            *out_first_0x20_pid = first_0x20_pid;
+        }
+        return;
+    }
+}
+
+static void _open3d_mvc_log_refresh_state(BLURAY *bd,
+                                          const MPLS_STREAM *dep_stream,
+                                          const NAV_CLIP *resolved_dep_clip,
+                                          const char *resolved_via)
+{
+    const BD_OPEN3D_MVC_INFO *info;
+    const char *base_clip_id;
+    const char *dep_clip_id;
+    unsigned dep_prog_ss = 0;
+    int dep_first_nonempty_prog = -1;
+    unsigned dep_first_nonempty_streams = 0;
+    uint16_t dep_first_stream_pid = 0;
+    uint16_t dep_first_0x20_pid = 0;
+
+    if (!bd) {
+        return;
+    }
+
+    info = &bd->open3d_mvc.info;
+    base_clip_id = info->base_clip_id[0] ? info->base_clip_id : "-";
+    dep_clip_id = info->dependent_clip_id[0] ? info->dependent_clip_id : "-";
+
+    _open3d_mvc_describe_dependent_clip(resolved_dep_clip,
+                                        &dep_prog_ss,
+                                        &dep_first_nonempty_prog,
+                                        &dep_first_nonempty_streams,
+                                        &dep_first_stream_pid,
+                                        &dep_first_0x20_pid);
+
+    _open3d_mvc_runtime_diag(
+             "refresh_state playitem=%d via=%s available=%u "
+             "base=%s dep=%s base_pid=0x%04x dep_pid=0x%04x "
+             "dep_stream_pid=0x%04x dep_stream_subpath=%d dep_stream_subclip=%d "
+             "dep_clip_cl=%u dep_prog_ss=%u dep_first_nonempty_prog=%d "
+             "dep_first_nonempty_streams=%u dep_first_stream_pid=0x%04x "
+             "dep_first_0x20_pid=0x%04x",
+             info->playitem_index,
+             resolved_via ? resolved_via : "none",
+             info->available,
+             base_clip_id,
+             dep_clip_id,
+             info->base_pid,
+             info->dependent_pid,
+             dep_stream ? dep_stream->pid : 0,
+             dep_stream ? (int)dep_stream->subpath_id : -1,
+             dep_stream ? (int)dep_stream->subclip_id : -1,
+             resolved_dep_clip && resolved_dep_clip->cl ? 1U : 0U,
+             dep_prog_ss,
+             dep_first_nonempty_prog,
+             dep_first_nonempty_streams,
+             dep_first_stream_pid,
+             dep_first_0x20_pid);
+
+    BD_DEBUG(DBG_BLURAY,
+             "open3d_mvc_refresh_state playitem=%d via=%s available=%u "
+             "base=%s dep=%s base_pid=0x%04x dep_pid=0x%04x "
+             "dep_stream_pid=0x%04x dep_stream_subpath=%d dep_stream_subclip=%d "
+             "dep_clip_cl=%u dep_prog_ss=%u dep_first_nonempty_prog=%d "
+             "dep_first_nonempty_streams=%u dep_first_stream_pid=0x%04x "
+             "dep_first_0x20_pid=0x%04x\n",
+             info->playitem_index,
+             resolved_via ? resolved_via : "none",
+             info->available,
+             base_clip_id,
+             dep_clip_id,
+             info->base_pid,
+             info->dependent_pid,
+             dep_stream ? dep_stream->pid : 0,
+             dep_stream ? (int)dep_stream->subpath_id : -1,
+             dep_stream ? (int)dep_stream->subclip_id : -1,
+             resolved_dep_clip && resolved_dep_clip->cl ? 1U : 0U,
+             dep_prog_ss,
+             dep_first_nonempty_prog,
+             dep_first_nonempty_streams,
+             dep_first_stream_pid,
+             dep_first_0x20_pid);
+}
+
+static void _open3d_mvc_log_ensure_failure(BLURAY *bd, const char *reason)
+{
+    BD_OPEN3D_MVC_RUNTIME *mvc;
+    const BD_OPEN3D_MVC_INFO *info;
+    const char *base_clip_id;
+    const char *dep_clip_id;
+    unsigned dep_prog_ss = 0;
+    int dep_first_nonempty_prog = -1;
+    unsigned dep_first_nonempty_streams = 0;
+    uint16_t dep_first_stream_pid = 0;
+    uint16_t dep_first_0x20_pid = 0;
+
+    if (!bd) {
+        return;
+    }
+
+    mvc = &bd->open3d_mvc;
+    if (mvc->ensure_failure_logged) {
+        return;
+    }
+    mvc->ensure_failure_logged = 1;
+
+    info = &mvc->info;
+    base_clip_id = info->base_clip_id[0] ? info->base_clip_id : "-";
+    dep_clip_id = info->dependent_clip_id[0] ? info->dependent_clip_id : "-";
+
+    _open3d_mvc_describe_dependent_clip(mvc->dependent_clip,
+                                        &dep_prog_ss,
+                                        &dep_first_nonempty_prog,
+                                        &dep_first_nonempty_streams,
+                                        &dep_first_stream_pid,
+                                        &dep_first_0x20_pid);
+
+    _open3d_mvc_runtime_diag(
+             "ensure_%s playitem=%d available=%u "
+             "base=%s dep=%s dep_clip=%u dep_clip_cl=%u "
+             "base_pid=0x%04x dep_pid=0x%04x dep_prog_ss=%u "
+             "dep_first_nonempty_prog=%d dep_first_nonempty_streams=%u "
+             "dep_first_stream_pid=0x%04x dep_first_0x20_pid=0x%04x",
+             reason ? reason : "failed",
+             info->playitem_index,
+             info->available,
+             base_clip_id,
+             dep_clip_id,
+             mvc->dependent_clip ? 1U : 0U,
+             mvc->dependent_clip && mvc->dependent_clip->cl ? 1U : 0U,
+             info->base_pid,
+             info->dependent_pid,
+             dep_prog_ss,
+             dep_first_nonempty_prog,
+             dep_first_nonempty_streams,
+             dep_first_stream_pid,
+             dep_first_0x20_pid);
+
+    BD_DEBUG(DBG_BLURAY | DBG_CRIT,
+             "open3d_mvc_ensure_%s playitem=%d available=%u "
+             "base=%s dep=%s dep_clip=%u dep_clip_cl=%u "
+             "base_pid=0x%04x dep_pid=0x%04x dep_prog_ss=%u "
+             "dep_first_nonempty_prog=%d dep_first_nonempty_streams=%u "
+             "dep_first_stream_pid=0x%04x dep_first_0x20_pid=0x%04x\n",
+             reason ? reason : "failed",
+             info->playitem_index,
+             info->available,
+             base_clip_id,
+             dep_clip_id,
+             mvc->dependent_clip ? 1U : 0U,
+             mvc->dependent_clip && mvc->dependent_clip->cl ? 1U : 0U,
+             info->base_pid,
+             info->dependent_pid,
+             dep_prog_ss,
+             dep_first_nonempty_prog,
+             dep_first_nonempty_streams,
+             dep_first_stream_pid,
+             dep_first_0x20_pid);
+}
+
 static uint16_t _open3d_pick_base_pid(const MPLS_STN *stn, const NAV_CLIP *clip)
 {
     const MPLS_STREAM *stream = _open3d_pick_base_stream(stn);
@@ -1232,6 +1681,7 @@ static int _open3d_mvc_refresh_runtime_locked(BLURAY *bd)
     const MPLS_STREAM *dep_stream;
     const NAV_CLIP *base_clip;
     const NAV_CLIP *resolved_dep_clip = NULL;
+    const char *resolved_via = "none";
     unsigned main_playitem_index;
 
     if (!bd || !bd->title || !bd->title->pl || bd->title->pl->list_count < 1) {
@@ -1269,28 +1719,36 @@ static int _open3d_mvc_refresh_runtime_locked(BLURAY *bd)
                                           bd->title->sub_path, bd->title->sub_path_count,
                                           bd->title->pl->sub_path, bd->title->pl->sub_count,
                                           BD_OPEN3D_MVC_SUBPATH_NORMAL,
-                                          &resolved_dep_clip) ||
-        _open3d_try_resolve_subpath_exact(info, dep_stream,
-                                          bd->title->ext_sub_path, bd->title->ext_sub_path_count,
-                                          bd->title->pl->ext_sub_path, bd->title->pl->ext_sub_count,
-                                          BD_OPEN3D_MVC_SUBPATH_EXTENSION,
-                                          &resolved_dep_clip) ||
-        _open3d_try_resolve_subpath_scan(info, main_playitem_index,
-                                         bd->title->sub_path, bd->title->sub_path_count,
-                                         bd->title->pl->sub_path, bd->title->pl->sub_count,
-                                         BD_OPEN3D_MVC_SUBPATH_NORMAL,
-                                         &resolved_dep_clip) ||
-        _open3d_try_resolve_subpath_scan(info, main_playitem_index,
-                                         bd->title->ext_sub_path, bd->title->ext_sub_path_count,
-                                         bd->title->pl->ext_sub_path, bd->title->pl->ext_sub_count,
-                                         BD_OPEN3D_MVC_SUBPATH_EXTENSION,
-                                         &resolved_dep_clip)) {
+                                          &resolved_dep_clip)) {
+        resolved_via = "exact_normal";
+    } else if (_open3d_try_resolve_subpath_exact(info, dep_stream,
+                                                 bd->title->ext_sub_path, bd->title->ext_sub_path_count,
+                                                 bd->title->pl->ext_sub_path, bd->title->pl->ext_sub_count,
+                                                 BD_OPEN3D_MVC_SUBPATH_EXTENSION,
+                                                 &resolved_dep_clip)) {
+        resolved_via = "exact_extension";
+    } else if (_open3d_try_resolve_subpath_scan(info, main_playitem_index,
+                                                bd->title->sub_path, bd->title->sub_path_count,
+                                                bd->title->pl->sub_path, bd->title->pl->sub_count,
+                                                BD_OPEN3D_MVC_SUBPATH_NORMAL,
+                                                &resolved_dep_clip)) {
+        resolved_via = "scan_normal";
+    } else if (_open3d_try_resolve_subpath_scan(info, main_playitem_index,
+                                                bd->title->ext_sub_path, bd->title->ext_sub_path_count,
+                                                bd->title->pl->ext_sub_path, bd->title->pl->ext_sub_count,
+                                                BD_OPEN3D_MVC_SUBPATH_EXTENSION,
+                                                &resolved_dep_clip)) {
+        resolved_via = "scan_extension";
+    }
+
+    if (resolved_dep_clip) {
         info->dependent_pid = _open3d_pick_dependent_pid(&pi->stn, resolved_dep_clip);
         info->available = 1;
         bd->open3d_mvc.dependent_clip = resolved_dep_clip;
     }
 
     bd->open3d_mvc.valid = 1;
+    _open3d_mvc_log_refresh_state(bd, dep_stream, resolved_dep_clip, resolved_via);
     _open3d_mvc_trace("assembler=lav playitem=%u base=%s dep=%s available=%u",
                       main_playitem_index,
                       info->base_clip_id,
@@ -1783,6 +2241,18 @@ static int64_t _open3d_mvc_trace_min_time(void)
     return min_time;
 }
 
+static int _open3d_mvc_runtime_diag_enabled(void)
+{
+    static int diag_enabled = -1;
+
+    if (diag_enabled < 0) {
+        const char *env = getenv("OPEN3D_LIBBLURAY_MVC_RUNTIME_DIAG");
+        diag_enabled = (env && env[0] && strcmp(env, "0")) ? 1 : 0;
+    }
+
+    return diag_enabled;
+}
+
 static void _open3d_mvc_trace(const char *fmt, ...)
 {
     va_list ap;
@@ -1792,6 +2262,21 @@ static void _open3d_mvc_trace(const char *fmt, ...)
     }
 
     fprintf(stderr, "open3d_libbluray_mvc: ");
+    va_start(ap, fmt);
+    vfprintf(stderr, fmt, ap);
+    va_end(ap);
+    fputc('\n', stderr);
+}
+
+static void _open3d_mvc_runtime_diag(const char *fmt, ...)
+{
+    va_list ap;
+
+    if (!_open3d_mvc_runtime_diag_enabled()) {
+        return;
+    }
+
+    fprintf(stderr, "open3d_libbluray_mvc_diag: ");
     va_start(ap, fmt);
     vfprintf(stderr, fmt, ap);
     va_end(ap);
@@ -3065,13 +3550,19 @@ static int _open3d_mvc_ensure_sidecar_locked(BLURAY *bd)
     BD_OPEN3D_MVC_RUNTIME *mvc;
     int opened_dep = 0;
 
-    if (!bd || !_open3d_mvc_refresh_runtime_locked(bd)) {
+    if (!bd) {
+        return 0;
+    }
+
+    if (!_open3d_mvc_refresh_runtime_locked(bd)) {
+        _open3d_mvc_log_ensure_failure(bd, "refresh_failed");
         return 0;
     }
 
     mvc = &bd->open3d_mvc;
     if (!mvc->info.available || !mvc->dependent_clip ||
         !mvc->info.base_pid || !mvc->info.dependent_pid) {
+        _open3d_mvc_log_ensure_failure(bd, "guard");
         return 0;
     }
 
@@ -3082,6 +3573,7 @@ static int _open3d_mvc_ensure_sidecar_locked(BLURAY *bd)
         mvc->dep_demux = m2ts_demux_init(mvc->info.dependent_pid);
     }
     if (!mvc->base_demux || !mvc->dep_demux) {
+        _open3d_mvc_log_ensure_failure(bd, "demux_init_failed");
         return 0;
     }
 
@@ -3091,6 +3583,7 @@ static int _open3d_mvc_ensure_sidecar_locked(BLURAY *bd)
         pes_buffer_free(&mvc->dep_queue);
         mvc->dep_st.clip = mvc->dependent_clip;
         if (!_open_m2ts(bd, &mvc->dep_st)) {
+            _open3d_mvc_log_ensure_failure(bd, "dep_open_failed");
             return 0;
         }
         opened_dep = 1;
@@ -3102,6 +3595,7 @@ static int _open3d_mvc_ensure_sidecar_locked(BLURAY *bd)
             pes_buffer_free(&mvc->dep_queue);
         }
         if (_seek_stream(bd, &mvc->dep_st, mvc->dependent_clip, mvc->dep_seek_pkt) < 0) {
+            _open3d_mvc_log_ensure_failure(bd, "dep_seek_failed");
             return 0;
         }
         _open3d_mvc_trace("dep_seek_apply dep_clip=%s dep_pkt=%u dep_time=%u",
@@ -3111,6 +3605,7 @@ static int _open3d_mvc_ensure_sidecar_locked(BLURAY *bd)
         mvc->dep_seek_pending = 0;
     }
 
+    mvc->ensure_failure_logged = 0;
     return 1;
 }
 
@@ -3809,8 +4304,10 @@ static int _run_gc(BLURAY *bd, gc_ctrl_e msg, uint32_t param)
 
     if (bd->graphics_controller && bd->hdmv_vm) {
         GC_NAV_CMDS cmds = {-1, NULL, -1, 0, 0, EMPTY_UO_MASK};
+        uint32_t prev_status = bd->gc_status;
 
         result = gc_run(bd->graphics_controller, msg, param, &cmds);
+        _open3d_trace_gc_run(bd, msg, param, result, prev_status, &cmds);
 
         if (cmds.num_nav_cmds > 0) {
             hdmv_vm_set_object(bd->hdmv_vm, cmds.num_nav_cmds, cmds.nav_cmds);
@@ -4199,6 +4696,48 @@ int bd_set_virtual_package(BLURAY *bd, const char *vp_path, int psr_init_backup)
     return ret;
 }
 
+void bd_get_virtual_package_guard(BLURAY *bd, int *can_set, int *has_title,
+                                  int *title_type, int *wait_start,
+                                  uint32_t *psr_title, uint32_t *psr_playlist)
+{
+    int local_can_set = 0;
+    int local_has_title = 0;
+    int local_title_type = -1;
+    int local_wait_start = 0;
+    uint32_t local_psr_title = 0;
+    uint32_t local_psr_playlist = 0;
+
+    if (bd) {
+        bd_mutex_lock(&bd->mutex);
+        local_has_title = !!bd->title;
+        local_title_type = bd->title_type;
+        local_wait_start = !!bd->bdj_wait_start;
+        local_psr_title = bd_psr_read(bd->regs, PSR_TITLE_NUMBER);
+        local_psr_playlist = bd_psr_read(bd->regs, PSR_PLAYLIST);
+        local_can_set = !bd->title && bd->title_type == title_bdj;
+        bd_mutex_unlock(&bd->mutex);
+    }
+
+    if (can_set) {
+        *can_set = local_can_set;
+    }
+    if (has_title) {
+        *has_title = local_has_title;
+    }
+    if (title_type) {
+        *title_type = local_title_type;
+    }
+    if (wait_start) {
+        *wait_start = local_wait_start;
+    }
+    if (psr_title) {
+        *psr_title = local_psr_title;
+    }
+    if (psr_playlist) {
+        *psr_playlist = local_psr_playlist;
+    }
+}
+
 BD_DISC *bd_get_disc(BLURAY *bd)
 {
     return bd ? bd->disc : NULL;
@@ -4241,6 +4780,94 @@ void bd_unlock_osd_buffer(BLURAY *bd)
     bd_mutex_unlock(&bd->argb_buffer_mutex);
 }
 
+void bd_set_ig_s3d_state(struct bluray *bd,
+                         uint8_t mode_valid,
+                         int32_t mode,
+                         uint8_t offset_valid,
+                         int32_t offset)
+{
+    if (!bd) {
+        return;
+    }
+
+    bd_mutex_lock(&bd->mutex);
+    if (bd->bdj_ig_s3d_mode_valid != mode_valid ||
+        bd->bdj_ig_s3d_mode != mode ||
+        bd->bdj_ig_s3d_offset_valid != offset_valid ||
+        bd->bdj_ig_s3d_offset != offset) {
+        bd->bdj_ig_s3d_mode_valid = mode_valid;
+        bd->bdj_ig_s3d_mode = mode;
+        bd->bdj_ig_s3d_offset_valid = offset_valid;
+        bd->bdj_ig_s3d_offset = offset;
+        bd->bdj_ig_s3d_epoch++;
+    }
+    bd_mutex_unlock(&bd->mutex);
+}
+
+int bd_get_ig_s3d_state(BLURAY *bd, BLURAY_IG_S3D_STATE *state)
+{
+    if (!bd || !state) {
+        return 0;
+    }
+
+    bd_mutex_lock(&bd->mutex);
+    state->epoch = bd->bdj_ig_s3d_epoch;
+    state->mode_valid = bd->bdj_ig_s3d_mode_valid;
+    state->offset_valid = bd->bdj_ig_s3d_offset_valid;
+    state->mode = bd->bdj_ig_s3d_mode;
+    state->offset = bd->bdj_ig_s3d_offset;
+    bd_mutex_unlock(&bd->mutex);
+    return 1;
+}
+
+static int _trace_osd_sample_match(int width, int height, int x0, int y0, int x1, int y1)
+{
+    if (width != 1920 || height != 1080) {
+        return 0;
+    }
+
+    if (x0 == 0 && y0 == 0 && x1 == 1919 && y1 == 1079) {
+        return 1;
+    }
+
+    if (x0 == 396 && y0 == 888 && x1 == 1521 && y1 == 979) {
+        return 1;
+    }
+
+    return 0;
+}
+
+static unsigned _trace_osd_sample_pixel(const unsigned *img, int width, int height, int x, int y)
+{
+    if (!img || x < 0 || y < 0 || x >= width || y >= height) {
+        return 0;
+    }
+
+    return img[y * width + x];
+}
+
+static void _trace_osd_samples(const unsigned *img, int width, int height,
+                               int x0, int y0, int x1, int y1)
+{
+    static unsigned count = 0;
+
+    if (!_trace_osd_sample_match(width, height, x0, y0, x1, y1) || count >= 24) {
+        return;
+    }
+
+    count++;
+
+    BD_DEBUG(DBG_BDJ,
+             "TRACE graphics osd-cb samples rect=%d,%d-%d,%d "
+             "p00=0x%08x p960x540=0x%08x p500x920=0x%08x p1000x920=0x%08x p1300x920=0x%08x\n",
+             x0, y0, x1, y1,
+             _trace_osd_sample_pixel(img, width, height, 0, 0),
+             _trace_osd_sample_pixel(img, width, height, 960, 540),
+             _trace_osd_sample_pixel(img, width, height, 500, 920),
+             _trace_osd_sample_pixel(img, width, height, 1000, 920),
+             _trace_osd_sample_pixel(img, width, height, 1300, 920));
+}
+
 /*
  * handle graphics updates from BD-J layer
  */
@@ -4248,8 +4875,36 @@ void bd_bdj_osd_cb(BLURAY *bd, const unsigned *img, int w, int h,
                    int x0, int y0, int x1, int y1)
 {
     BD_ARGB_OVERLAY aov;
+    const int trace_graphics = _trace_bdj_graphics_enabled();
+    bd_argb_overlay_proc_f overlay_proc = NULL;
+    void *overlay_handle = NULL;
+    BD_ARGB_BUFFER *argb_buffer = NULL;
 
-    if (!bd->argb_overlay_proc) {
+    bd_mutex_lock(&bd->argb_buffer_mutex);
+    overlay_proc = bd->argb_overlay_proc;
+    overlay_handle = bd->argb_overlay_proc_handle;
+    argb_buffer = bd->argb_buffer;
+    bd_mutex_unlock(&bd->argb_buffer_mutex);
+
+    if (trace_graphics) {
+        BD_DEBUG(DBG_BDJ,
+                 "TRACE graphics argb-dispatch handle=%p func_present=%d buf=%p buf_size=%dx%d "
+                 "mode=%s img=%d size=%dx%d rect=%d,%d-%d,%d\n",
+                 overlay_handle,
+                 overlay_proc ? 1 : 0,
+                 (void *)argb_buffer,
+                 argb_buffer ? argb_buffer->width : 0,
+                 argb_buffer ? argb_buffer->height : 0,
+                 argb_buffer ? "app-buffer" : "callback",
+                 img ? 1 : 0, w, h, x0, y0, x1, y1);
+    }
+
+    if (!overlay_proc) {
+        if (trace_graphics) {
+            BD_DEBUG(DBG_BDJ,
+                     "TRACE graphics osd-cb no-overlay-proc img=%d size=%dx%d rect=%d,%d-%d,%d\n",
+                     img ? 1 : 0, w, h, x0, y0, x1, y1);
+        }
         _queue_event(bd, BD_EVENT_MENU, 0);
         return;
     }
@@ -4264,13 +4919,23 @@ void bd_bdj_osd_cb(BLURAY *bd, const unsigned *img, int w, int h,
             aov.cmd = BD_ARGB_OVERLAY_INIT;
             aov.w   = w;
             aov.h   = h;
+            if (trace_graphics) {
+                BD_DEBUG(DBG_BDJ,
+                         "TRACE graphics osd-cb cmd=INIT plane=%d size=%dx%d\n",
+                         aov.plane, aov.w, aov.h);
+            }
             _queue_event(bd, BD_EVENT_MENU, 1);
         } else {
             aov.cmd = BD_ARGB_OVERLAY_CLOSE;
+            if (trace_graphics) {
+                BD_DEBUG(DBG_BDJ,
+                         "TRACE graphics osd-cb cmd=CLOSE plane=%d\n",
+                         aov.plane);
+            }
             _queue_event(bd, BD_EVENT_MENU, 0);
         }
 
-        bd->argb_overlay_proc(bd->argb_overlay_proc_handle, &aov);
+        overlay_proc(overlay_handle, &aov);
         return;
     }
 
@@ -4280,7 +4945,7 @@ void bd_bdj_osd_cb(BLURAY *bd, const unsigned *img, int w, int h,
     }
 
     /* pass only changed region */
-    if (bd->argb_buffer && (bd->argb_buffer->width < w || bd->argb_buffer->height < h)) {
+    if (argb_buffer && (argb_buffer->width < w || argb_buffer->height < h)) {
         aov.argb   = img;
     } else {
         aov.argb   = img + x0 + y0 * w;
@@ -4291,28 +4956,39 @@ void bd_bdj_osd_cb(BLURAY *bd, const unsigned *img, int w, int h,
     aov.w      = x1 - x0 + 1;
     aov.h      = y1 - y0 + 1;
 
-    if (bd->argb_buffer) {
+    if (argb_buffer) {
         /* set dirty region */
-        bd->argb_buffer->dirty[BD_OVERLAY_IG].x0 = x0;
-        bd->argb_buffer->dirty[BD_OVERLAY_IG].x1 = x1;
-        bd->argb_buffer->dirty[BD_OVERLAY_IG].y0 = y0;
-        bd->argb_buffer->dirty[BD_OVERLAY_IG].y1 = y1;
+        argb_buffer->dirty[BD_OVERLAY_IG].x0 = x0;
+        argb_buffer->dirty[BD_OVERLAY_IG].x1 = x1;
+        argb_buffer->dirty[BD_OVERLAY_IG].y0 = y0;
+        argb_buffer->dirty[BD_OVERLAY_IG].y1 = y1;
     }
 
     /* draw */
     aov.cmd = BD_ARGB_OVERLAY_DRAW;
-    bd->argb_overlay_proc(bd->argb_overlay_proc_handle, &aov);
+    if (trace_graphics) {
+        BD_DEBUG(DBG_BDJ,
+                 "TRACE graphics osd-cb cmd=DRAW plane=%d rect=%d,%d %dx%d stride=%d\n",
+                 aov.plane, aov.x, aov.y, aov.w, aov.h, aov.stride);
+        _trace_osd_samples(img, w, h, x0, y0, x1, y1);
+    }
+    overlay_proc(overlay_handle, &aov);
 
     /* commit changes */
     aov.cmd = BD_ARGB_OVERLAY_FLUSH;
-    bd->argb_overlay_proc(bd->argb_overlay_proc_handle, &aov);
+    if (trace_graphics) {
+        BD_DEBUG(DBG_BDJ,
+                 "TRACE graphics osd-cb cmd=FLUSH plane=%d rect=%d,%d %dx%d\n",
+                 aov.plane, aov.x, aov.y, aov.w, aov.h);
+    }
+    overlay_proc(overlay_handle, &aov);
 
-    if (bd->argb_buffer) {
+    if (argb_buffer) {
         /* reset dirty region */
-        bd->argb_buffer->dirty[BD_OVERLAY_IG].x0 = bd->argb_buffer->width;
-        bd->argb_buffer->dirty[BD_OVERLAY_IG].x1 = bd->argb_buffer->height;
-        bd->argb_buffer->dirty[BD_OVERLAY_IG].y0 = 0;
-        bd->argb_buffer->dirty[BD_OVERLAY_IG].y1 = 0;
+        argb_buffer->dirty[BD_OVERLAY_IG].x0 = argb_buffer->width;
+        argb_buffer->dirty[BD_OVERLAY_IG].x1 = argb_buffer->height;
+        argb_buffer->dirty[BD_OVERLAY_IG].y0 = 0;
+        argb_buffer->dirty[BD_OVERLAY_IG].y1 = 0;
     }
 }
 
@@ -5290,10 +5966,12 @@ static int _init_ig_stream(BLURAY *bd)
     int      ig_subpath = -1;
     unsigned ig_subclip = 0;
     uint16_t ig_pid     = 0;
+    int      result     = 0;
 
     bd->st0.ig_pid = 0;
 
     if (!bd->title || !bd->graphics_controller) {
+        _open3d_trace_ig_init(bd, "skip", ig_pid, ig_subpath, ig_subclip, 0);
         return 0;
     }
 
@@ -5302,16 +5980,21 @@ static int _init_ig_stream(BLURAY *bd)
     /* decode already preloaded IG sub-path */
     if (bd->st_ig.clip) {
         gc_decode_ts(bd->graphics_controller, ig_pid, bd->st_ig.buf, SPN(bd->st_ig.clip_size) / 32, -1);
-        return 1;
+        result = 1;
+        _open3d_trace_ig_init(bd, "preloaded", ig_pid, ig_subpath, ig_subclip, result);
+        return result;
     }
 
     /* store PID of main path embedded IG stream */
     if (ig_subpath < 0) {
         bd->st0.ig_pid = ig_pid;
-        return 1;
+        result = 1;
+        _open3d_trace_ig_init(bd, "main-path", ig_pid, ig_subpath, ig_subclip, result);
+        return result;
     }
 
-    return 0;
+    _open3d_trace_ig_init(bd, "subpath-miss", ig_pid, ig_subpath, ig_subclip, result);
+    return result;
 }
 
 /*
@@ -5400,6 +6083,7 @@ static int _open_playlist(BLURAY *bd, unsigned playlist, unsigned angle)
         disc_event(bd->disc, DISC_EVENT_START, bd->disc_info.num_titles);
     }
 
+    _open3d_trace_close_playlist(bd, "open_playlist");
     _close_playlist(bd);
 
     bd->title = nav_title_open(bd->disc, f_name, angle);
@@ -5464,6 +6148,7 @@ int bd_select_playlist(BLURAY *bd, uint32_t playlist)
         }
     }
 
+    _open3d_trace_open_playlist_request(bd, "select_playlist", playlist, 0);
     result = _open_playlist(bd, playlist, 0);
 
     bd_mutex_unlock(&bd->mutex);
@@ -5475,10 +6160,12 @@ int bd_select_playlist(BLURAY *bd, uint32_t playlist)
 static int _play_playlist_at(BLURAY *bd, int playlist, int playitem, int playmark, int64_t time)
 {
     if (playlist < 0) {
+        _open3d_trace_close_playlist(bd, "play_playlist_at_negative");
         _close_playlist(bd);
         return 1;
     }
 
+    _open3d_trace_open_playlist_request(bd, "play_playlist_at", (unsigned)playlist, 0);
     if (!_open_playlist(bd, playlist, 0)) {
         return 0;
     }
@@ -5520,6 +6207,8 @@ static int _select_title(BLURAY *bd, uint32_t title_idx)
 
     bd->title_idx = title_idx;
 
+    _open3d_trace_open_playlist_request(bd, "select_title",
+                                        bd->title_list->title_info[title_idx].mpls_id, 0);
     return _open_playlist(bd, bd->title_list->title_info[title_idx].mpls_id, 0);
 }
 
@@ -6170,6 +6859,11 @@ static void _process_psr_restore_event(BLURAY *bd, const BD_PSR_EVENT *ev)
             /* can't set angle before playlist is opened */
             return;
         case PSR_TITLE_NUMBER:
+            if (_open3d_trace_enabled("OPEN3D_LIBBLURAY_TRACE_MENU")) {
+                BD_DEBUG(DBG_BLURAY | DBG_CRIT,
+                         "TRACE nativeTitle: psrRestoreTitle old=%u new=%u title_type=%d\n",
+                         ev->old_val, ev->new_val, bd->title_type);
+            }
             /* pass to the application */
             _queue_event(bd, BD_EVENT_TITLE, ev->new_val);
             return;
@@ -6177,13 +6871,16 @@ static void _process_psr_restore_event(BLURAY *bd, const BD_PSR_EVENT *ev)
             /* will be selected automatically */
             return;
         case PSR_PLAYLIST:
+            _open3d_trace_psr_restore(bd, "playlist", ev->psr_idx, ev->old_val, ev->new_val);
             bd_select_playlist(bd, ev->new_val);
             nav_set_angle(bd->title, bd_psr_read(bd->regs, PSR_ANGLE_NUMBER) - 1);
             return;
         case PSR_PLAYITEM:
+            _open3d_trace_psr_restore(bd, "playitem", ev->psr_idx, ev->old_val, ev->new_val);
             bd_seek_playitem(bd, ev->new_val);
             return;
         case PSR_TIME:
+            _open3d_trace_psr_restore(bd, "time", ev->psr_idx, ev->old_val, ev->new_val);
             _clip_seek_time(bd, ev->new_val);
             _init_ig_stream(bd);
             _run_gc(bd, GC_CTRL_INIT_MENU, 0);
@@ -6219,6 +6916,11 @@ static void _process_psr_write_event(BLURAY *bd, const BD_PSR_EVENT *ev)
             _queue_event(bd, BD_EVENT_ANGLE,    ev->new_val);
             break;
         case PSR_TITLE_NUMBER:
+            if (_open3d_trace_enabled("OPEN3D_LIBBLURAY_TRACE_MENU")) {
+                BD_DEBUG(DBG_BLURAY | DBG_CRIT,
+                         "TRACE nativeTitle: psrTitle old=%u new=%u title_type=%d\n",
+                         ev->old_val, ev->new_val, bd->title_type);
+            }
             _queue_event(bd, BD_EVENT_TITLE,    ev->new_val);
             break;
         case PSR_PLAYLIST:
@@ -6412,6 +7114,12 @@ static int _play_hdmv(BLURAY *bd, unsigned id_ref)
 
 static int _play_title(BLURAY *bd, unsigned title)
 {
+    if (_open3d_trace_enabled("OPEN3D_LIBBLURAY_TRACE_MENU")) {
+        BD_DEBUG(DBG_BLURAY | DBG_CRIT,
+                 "TRACE nativeTitle: playTitle request=%u current_psr=%u title_type=%d\n",
+                 title, bd_psr_read(bd->regs, PSR_TITLE_NUMBER), bd->title_type);
+    }
+
     if (!bd->disc_info.titles) {
         BD_DEBUG(DBG_BLURAY | DBG_CRIT, "_play_title(#%d): No disc index\n", title);
         return 0;
@@ -6461,6 +7169,14 @@ static int _play_title(BLURAY *bd, unsigned title)
     if (title <= bd->disc_info.num_titles) {
 
         bd_psr_write(bd->regs, PSR_TITLE_NUMBER, title); /* 5.2.3.3 */
+        if (_open3d_trace_enabled("OPEN3D_LIBBLURAY_TRACE_MENU")) {
+            BD_DEBUG(DBG_BLURAY | DBG_CRIT,
+                     "TRACE nativeTitle: playTitle dispatch=%u bdj=%u id_ref=%u interactive=%u\n",
+                     title,
+                     bd->disc_info.titles[title]->bdj,
+                     bd->disc_info.titles[title]->id_ref,
+                     bd->disc_info.titles[title]->interactive);
+        }
         if (bd->disc_info.titles[title]->bdj) {
             return _play_bdj(bd, title);
         } else {
@@ -6591,9 +7307,16 @@ int bd_menu_call(BLURAY *bd, int64_t pts)
 static void _process_hdmv_vm_event(BLURAY *bd, HDMV_EVENT *hev)
 {
     BD_DEBUG(DBG_BLURAY, "HDMV event: %s(%d): %d\n", hdmv_event_str(hev->event), hev->event, hev->param);
+    _open3d_trace_hdmv_event(bd, hev);
 
     switch (hev->event) {
         case HDMV_EVENT_TITLE:
+            if (_open3d_trace_enabled("OPEN3D_LIBBLURAY_TRACE_MENU")) {
+                BD_DEBUG(DBG_BLURAY | DBG_CRIT,
+                         "TRACE nativeTitle: hdmvEventTitle param=%u current_psr=%u title_type=%d\n",
+                         hev->param, bd_psr_read(bd->regs, PSR_TITLE_NUMBER), bd->title_type);
+            }
+            _open3d_trace_close_playlist(bd, "hdmv_event_title");
             _close_playlist(bd);
             _play_title(bd, hev->param);
             break;
@@ -6601,6 +7324,7 @@ static void _process_hdmv_vm_event(BLURAY *bd, HDMV_EVENT *hev)
         case HDMV_EVENT_PLAY_PL:
         case HDMV_EVENT_PLAY_PL_PI:
         case HDMV_EVENT_PLAY_PL_PM:
+            _open3d_trace_open_playlist_request(bd, "hdmv_event_play_pl", hev->param, 0);
             if (!_open_playlist(bd, hev->param, 0)) {
                 /* Missing playlist ?
                  * Seen on some discs while checking UHD capability.
@@ -6638,6 +7362,7 @@ static void _process_hdmv_vm_event(BLURAY *bd, HDMV_EVENT *hev)
 
         case HDMV_EVENT_PLAY_STOP:
             // stop current playlist
+            _open3d_trace_close_playlist(bd, "hdmv_event_play_stop");
             _close_playlist(bd);
 
             bd->hdmv_suspended = !hdmv_vm_running(bd->hdmv_vm);
@@ -7019,6 +7744,17 @@ void bd_register_argb_overlay_proc(BLURAY *bd, void *handle, bd_argb_overlay_pro
     bd->argb_buffer              = buf;
 
     bd_mutex_unlock(&bd->argb_buffer_mutex);
+
+    if (_trace_bdj_graphics_enabled()) {
+        BD_DEBUG(DBG_BDJ,
+                 "TRACE graphics argb-register handle=%p func_present=%d buf=%p buf_size=%dx%d mode=%s\n",
+                 handle,
+                 func ? 1 : 0,
+                 (void *)buf,
+                 buf ? buf->width : 0,
+                 buf ? buf->height : 0,
+                 buf ? "app-buffer" : "callback");
+    }
 }
 
 int bd_get_sound_effect(BLURAY *bd, unsigned sound_id, BLURAY_SOUND_EFFECT *effect)

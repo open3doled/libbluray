@@ -174,6 +174,14 @@ JNIEXPORT jint JNICALL Java_org_videolan_Libbluray_setVirtualPackageN
 
 /*
  * Class:     org_videolan_Libbluray
+ * Method:    describeVirtualPackageGuardN
+ * Signature: (J)Ljava/lang/String;
+ */
+JNIEXPORT jstring JNICALL Java_org_videolan_Libbluray_describeVirtualPackageGuardN
+  (JNIEnv * env, jclass cls, jlong np);
+
+/*
+ * Class:     org_videolan_Libbluray
  * Method:    selectAngleN
  * Signature: (JI)I
  */

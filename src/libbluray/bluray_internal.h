@@ -34,6 +34,9 @@ struct bd_disc;
 BD_PRIVATE struct bd_disc *bd_get_disc(struct bluray *bd);
 
 BD_PRIVATE int      bd_set_virtual_package(struct bluray *bd, const char *vp_path, int psr_init_backup);
+BD_PRIVATE void     bd_get_virtual_package_guard(struct bluray *bd, int *can_set, int *has_title,
+                                                 int *title_type, int *wait_start,
+                                                 uint32_t *psr_title, uint32_t *psr_playlist);
 
 /*
  * UO mask, KIT
@@ -82,6 +85,11 @@ struct bd_argb_buffer_s;
 
 BD_PRIVATE struct bd_argb_buffer_s *bd_lock_osd_buffer(struct bluray *bd);
 BD_PRIVATE void                     bd_unlock_osd_buffer(struct bluray *bd);
+BD_PRIVATE void                     bd_set_ig_s3d_state(struct bluray *bd,
+                                                        uint8_t mode_valid,
+                                                        int32_t mode,
+                                                        uint8_t offset_valid,
+                                                        int32_t offset);
 
 BD_PRIVATE void  bd_bdj_osd_cb(struct bluray *bd, const unsigned *img, int w, int h,
                                int x0, int y0, int x1, int y1);

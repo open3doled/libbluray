@@ -19,8 +19,9 @@
 
 package org.havi.ui;
 
-import org.videolan.GUIManager;
 import org.videolan.BDJXletContext;
+import org.videolan.BDJDebug;
+import org.videolan.GUIManager;
 import org.videolan.Logger;
 
 public class HSceneFactory extends Object {
@@ -72,6 +73,16 @@ public class HSceneFactory extends Object {
                 defaultHScene.setLocation(0, 0);
                 defaultHScene.setSize(GUIManager.getInstance().getWidth(), GUIManager.getInstance().getHeight());
                 GUIManager.getInstance().add(defaultHScene);
+                BDJDebug.traceScene(logger,
+                                    "getDefaultHScene created scene@" +
+                                    Integer.toHexString(System.identityHashCode(defaultHScene)) +
+                                    " size=" + defaultHScene.getWidth() + "x" + defaultHScene.getHeight());
+            } else {
+                BDJDebug.traceScene(logger,
+                                    "getDefaultHScene reused scene@" +
+                                    Integer.toHexString(System.identityHashCode(defaultHScene)) +
+                                    " visible=" + defaultHScene.isVisible() +
+                                    " size=" + defaultHScene.getWidth() + "x" + defaultHScene.getHeight());
             }
         }
 
@@ -111,6 +122,8 @@ public class HSceneFactory extends Object {
 
         scene.disposeImpl();
         GUIManager.getInstance().remove(scene);
+        BDJDebug.traceScene(logger,
+                            "dispose scene@" + Integer.toHexString(System.identityHashCode(scene)));
         defaultHScene = null;
     }
 

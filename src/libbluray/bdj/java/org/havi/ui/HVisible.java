@@ -26,6 +26,7 @@ import java.awt.Dimension;
 import java.util.Hashtable;
 import java.util.Map;
 
+import org.videolan.BDJDebug;
 import org.videolan.Logger;
 
 public class HVisible extends HComponent implements HState {
@@ -53,11 +54,23 @@ public class HVisible extends HComponent implements HState {
     }
 
     public void paint(Graphics g) {
+        BDJDebug.traceGraphics(logger,
+                               "HVisible.paint component=" + getClass().getName() +
+                               "@" + Integer.toHexString(System.identityHashCode(this)) +
+                               " graphics=" + (g == null ? "null" : g.getClass().getName()) +
+                               " visible=" + isVisible() +
+                               " state=" + InteractionState +
+                               " look=" + hLook);
         if (hLook != null)
             hLook.showLook(g, this, InteractionState);
     }
 
     public void update(Graphics g) {
+        BDJDebug.traceGraphics(logger,
+                               "HVisible.update component=" + getClass().getName() +
+                               "@" + Integer.toHexString(System.identityHashCode(this)) +
+                               " graphics=" + (g == null ? "null" : g.getClass().getName()) +
+                               " visible=" + isVisible());
         g.setColor(getBackground());
         paint(g);
     }
@@ -173,6 +186,11 @@ public class HVisible extends HComponent implements HState {
     }
 
     public void requestFocus() {
+        BDJDebug.traceScene(logger,
+                            "requestFocus component=" + getClass().getName() +
+                            "@" + Integer.toHexString(System.identityHashCode(this)) +
+                            " visible=" + isVisible() +
+                            " focusable=" + isFocusTraversable());
         super.requestFocus();
 
         if (isFocusTraversable())

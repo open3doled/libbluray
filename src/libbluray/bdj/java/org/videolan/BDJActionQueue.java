@@ -66,6 +66,22 @@ public class BDJActionQueue implements Runnable {
         }
     }
 
+    public String debugState() {
+        int pending;
+        synchronized (actions) {
+            pending = actions.size();
+        }
+
+        Thread localThread = thread;
+        Watchdog localWatchdog = watchdog;
+
+        return "terminated=" + terminated +
+               " pending=" + pending +
+               " workerAlive=" + (localThread != null && localThread.isAlive()) +
+               " watchdogAlive=" + (localWatchdog != null && localWatchdog.isAlive()) +
+               " watchdogTerminated=" + (localWatchdog != null && localWatchdog.isTerminated());
+    }
+
     public void run() {
         while (true) {
             Object action;
@@ -125,18 +141,27 @@ public class BDJActionQueue implements Runnable {
 
         private Object currentAction = null;
         private boolean terminate = false;
+        private Thread thread = null;
 
         Watchdog() {}
 
         synchronized void start(String name) {
-            Thread t = new Thread(null, this, name + ".BDJActionQueue.Monitor");
-            t.setDaemon(true);
-            t.start();
+            thread = new Thread(null, this, name + ".BDJActionQueue.Monitor");
+            thread.setDaemon(true);
+            thread.start();
         }
 
         public synchronized void shutdown() {
             terminate = true;
             notifyAll();
+        }
+
+        public synchronized boolean isAlive() {
+            return thread != null && thread.isAlive();
+        }
+
+        public synchronized boolean isTerminated() {
+            return terminate;
         }
 
         public synchronized void startAction(Object action) {

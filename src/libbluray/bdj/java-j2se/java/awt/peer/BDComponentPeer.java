@@ -23,6 +23,7 @@ import java.awt.*;
 import java.awt.event.*;
 import java.awt.image.*;
 
+import org.videolan.BDJDebug;
 import org.videolan.Logger;
 
 public abstract class BDComponentPeer implements ComponentPeer
@@ -59,6 +60,10 @@ public abstract class BDComponentPeer implements ComponentPeer
     public Image createImage(int width, int height) {
         Component parent = component.getParent();
         if (parent != null) {
+            BDJDebug.traceGraphics(logger,
+                                   "BDComponentPeer.createImage component=" + component +
+                                   " parent=" + parent +
+                                   " size=" + width + "x" + height);
             return parent.createImage(width, height);
         }
         logger.error("createImage(): no parent !");
@@ -114,6 +119,11 @@ public abstract class BDComponentPeer implements ComponentPeer
     public Graphics getGraphics() {
         Component parent = component.getParent();
         if (parent != null) {
+            BDJDebug.traceGraphics(logger,
+                                   "BDComponentPeer.getGraphics component=" + component +
+                                   " parent=" + parent +
+                                   " bounds=" + location.x + "," + location.y +
+                                   " " + size.width + "x" + size.height);
             Graphics g = parent.getGraphics();
             if (g != null) {
                 return g.create(location.x, location.y, size.width, size.height);
@@ -220,7 +230,23 @@ public abstract class BDComponentPeer implements ComponentPeer
 
     /* java 1.6 only */
     public void repaint(long tm, int x, int y, int width, int height) {
-        logger.unimplemented("repaint");
+        if (component == null || !component.isVisible() || component.getParent() == null) {
+            return;
+        }
+
+        if (width <= 0 || height <= 0) {
+            x = 0;
+            y = 0;
+            width = component.getWidth();
+            height = component.getHeight();
+        }
+
+        if (width <= 0 || height <= 0) {
+            return;
+        }
+
+        handleEvent(new PaintEvent(component, PaintEvent.UPDATE,
+                                   new Rectangle(x, y, width, height)));
     }
 
     public void reparent(ContainerPeer p) {

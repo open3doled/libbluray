@@ -272,6 +272,60 @@ public class BDJXletContext implements javax.tv.xlet.XletContext, javax.microedi
         return cnt;
     }
 
+    protected String cleanupState() {
+        BDJThreadGroup localThreadGroup = threadGroup;
+        EventQueue localEventQueue = eventQueue;
+        Thread eventDispatchThread = null;
+        if (localEventQueue != null) {
+            eventDispatchThread = java.awt.BDJHelper.getEventDispatchThread(localEventQueue);
+        }
+
+        int ixcThreadCount;
+        synchronized (ixcThreads) {
+            ixcThreadCount = ixcThreads.size();
+        }
+
+        int faaCount;
+        synchronized (faaList) {
+            faaCount = faaList.size();
+        }
+
+        int defaultLookCount = 0;
+        HashMap localDefaultLooks = defaultLooks;
+        if (localDefaultLooks != null) {
+            synchronized (localDefaultLooks) {
+                defaultLookCount = localDefaultLooks.size();
+            }
+        }
+
+        BDJActionQueue localCallbackQueue;
+        BDJActionQueue localUserEventQueue;
+        BDJActionQueue localMediaQueue;
+        TVTimerImpl localTvTimer;
+        synchronized (cbLock) {
+            localCallbackQueue = callbackQueue;
+            localUserEventQueue = userEventQueue;
+            localMediaQueue = mediaQueue;
+            localTvTimer = tvTimer;
+        }
+
+        return "released=" + released +
+               " threadGroup=" + (localThreadGroup == null ? "<null>" : localThreadGroup.getName()) +
+               " activeThreads=" + (localThreadGroup == null ? -1 : localThreadGroup.activeCount()) +
+               " eventQueue=" + (localEventQueue != null) +
+               " eventDispatchAlive=" + (eventDispatchThread != null && eventDispatchThread.isAlive()) +
+               " sockets={" + sockets.debugState() + "}" +
+               " ixcBindings=" + org.dvb.io.ixc.IxcRegistry.debugCountBindings(this) +
+               " ixcThreads=" + ixcThreadCount +
+               " faa=" + faaCount +
+               " defaultLooks=" + defaultLookCount +
+               " callbackQueue={" + (localCallbackQueue == null ? "<null>" : localCallbackQueue.debugState()) + "}" +
+               " userEventQueue={" + (localUserEventQueue == null ? "<null>" : localUserEventQueue.debugState()) + "}" +
+               " mediaQueue={" + (localMediaQueue == null ? "<null>" : localMediaQueue.debugState()) + "}" +
+               " tvTimer={" + (localTvTimer == null ? "<null>" : localTvTimer.debugState()) + "}" +
+               " sceneFactory=" + (sceneFactory != null);
+    }
+
     /*
      * HAVI
      */

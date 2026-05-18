@@ -34,7 +34,13 @@ public class GUIManager extends BDRootWindow {
         synchronized (instanceLock) {
             if (instance == null) {
                 instance = new GUIManager();
+                BDJDebug.traceScene(Logger.getLogger("GUIManager"),
+                                    "createInstance new gui@" + Integer.toHexString(System.identityHashCode(instance)));
             } else {
+                BDJDebug.traceScene(Logger.getLogger("GUIManager"),
+                                    "createInstance reuse gui@" + Integer.toHexString(System.identityHashCode(instance)) +
+                                    " components=" + instance.getComponentCount() +
+                                    " visible=" + instance.isVisible());
                 instance.clearOverlay();
                 instance.setDefaultFont(null);
             }
@@ -54,6 +60,8 @@ public class GUIManager extends BDRootWindow {
 
     BDJXletContext getFocusHSceneContext() {
         Component component = getFocusOwner();
+        BDJDebug.traceScene(Logger.getLogger("GUIManager"),
+                            "getFocusHSceneContext focusOwner=" + component);
         while (component != null) {
             if (component instanceof HScene)
                 return ((HScene)component).getXletContext();
@@ -76,6 +84,10 @@ public class GUIManager extends BDRootWindow {
 
     public void dispose() {
         try {
+            BDJDebug.traceScene(Logger.getLogger("GUIManager"),
+                                "dispose gui@" + Integer.toHexString(System.identityHashCode(this)) +
+                                " visible=" + isVisible() +
+                                " components=" + getComponentCount());
             super.dispose();
         } finally {
             instance = null;

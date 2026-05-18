@@ -69,6 +69,12 @@ public class BDJListeners {
                 logger.error("Listener added from wrong thread: " + Logger.dumpStack());
                 return;
             }
+            if ((listener instanceof ServiceContextListener) ||
+                (listener instanceof AppsDatabaseEventListener)) {
+                BDJDebug.traceLifecycle(logger, "listener.add type=" +
+                                        listener.getClass().getName() +
+                                        " ctx=" + ctx);
+            }
             synchronized (listeners) {
                 remove(listener);
                 listeners.add(new BDJListener(ctx, listener));
@@ -131,6 +137,20 @@ public class BDJListeners {
                     logger.info("Listener terminated: " + item.ctx);
                     it.remove();
                 } else {
+                    if (event instanceof ServiceContextEvent) {
+                        BDJDebug.traceLifecycle(logger, "listener.queue event=" +
+                                                event.getClass().getSimpleName() +
+                                                " listener=" + item.listener.getClass().getName() +
+                                                " ctx=" + item.ctx +
+                                                " mediaQueue=" + mediaQueue);
+                    } else if (event instanceof AppsDatabaseEvent) {
+                        AppsDatabaseEvent dbevent = (AppsDatabaseEvent)event;
+                        BDJDebug.traceLifecycle(logger, "listener.queue event=AppsDatabaseEvent(" +
+                                                dbevent.getEventId() + ")" +
+                                                " listener=" + item.listener.getClass().getName() +
+                                                " ctx=" + item.ctx +
+                                                " mediaQueue=" + mediaQueue);
+                    }
                     if (mediaQueue) {
                         item.ctx.putMediaCallback(new Callback(event, item.listener));
                     } else {
@@ -179,6 +199,10 @@ public class BDJListeners {
             } else if (event instanceof PlaybackPlayItemEvent) {
                 ((PlaybackListener)listener).playItemReached((PlaybackPlayItemEvent)event);
             } else if (event instanceof ServiceContextEvent) {
+                BDJDebug.traceLifecycle(logger, "listener.dispatch event=" +
+                                        event.getClass().getSimpleName() +
+                                        " listener=" + listener.getClass().getName() +
+                                        " ctx=" + BDJXletContext.getCurrentContext());
                 ((ServiceContextListener)listener).receiveServiceContextEvent((ServiceContextEvent)event);
             } else if (event instanceof UOMaskTableChangedEvent) {
                 ((UOMaskTableListener)listener).receiveUOMaskTableChangedEvent((UOMaskTableChangedEvent)event);
@@ -204,6 +228,10 @@ public class BDJListeners {
             } else if (event instanceof AppsDatabaseEvent) {
                 AppsDatabaseEvent dbevent = (AppsDatabaseEvent)event;
                 AppsDatabaseEventListener dblistener = (AppsDatabaseEventListener)listener;
+                BDJDebug.traceLifecycle(logger, "listener.dispatch event=AppsDatabaseEvent(" +
+                                        dbevent.getEventId() + ")" +
+                                        " listener=" + listener.getClass().getName() +
+                                        " ctx=" + BDJXletContext.getCurrentContext());
                 switch (dbevent.getEventId()) {
                 case AppsDatabaseEvent.APP_ADDED:
                     dblistener.entryAdded(dbevent);

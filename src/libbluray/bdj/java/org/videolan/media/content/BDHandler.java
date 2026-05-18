@@ -62,6 +62,7 @@ import org.bluray.media.OverallGainControl;
 import org.videolan.BDJAction;
 import org.videolan.BDJActionManager;
 import org.videolan.BDJActionQueue;
+import org.videolan.BDJDebug;
 import org.videolan.BDJListeners;
 import org.videolan.BDJXletContext;
 import org.videolan.Libbluray;
@@ -120,8 +121,18 @@ public abstract class BDHandler implements Player, ServiceContentHandler {
         try {
             Class cls = Class.forName(forName);
             for (int i = 0; i < controls.length; i++) {
-                if (cls.isInstance(controls[i]))
+                if (cls.isInstance(controls[i])) {
+                    if (shouldTraceControl(forName)) {
+                        logger.info("TRACE control-request name=" + forName +
+                                    " resolved=" + controls[i].getClass().getName() +
+                                    " handler=" + getClass().getName());
+                    }
                     return controls[i];
+                }
+            }
+            if (shouldTraceControl(forName)) {
+                logger.info("TRACE control-request name=" + forName +
+                            " resolved=<null> handler=" + getClass().getName());
             }
             Logger.getLogger("BDHandler").error("getControl(): control not found: " + forName);
             return null;
@@ -129,6 +140,16 @@ public abstract class BDHandler implements Player, ServiceContentHandler {
             Logger.getLogger("BDHandler").error("getControl(): " + e);
             return null;
         }
+    }
+
+    private static boolean shouldTraceControl(String forName) {
+        if (forName == null) {
+            return false;
+        }
+        return forName.indexOf("BackgroundVideoPresentationControl") >= 0 ||
+               forName.indexOf("VideoPresentationControl") >= 0 ||
+               forName.indexOf("AWTVideoSizeControl") >= 0 ||
+               forName.indexOf("VideoFormatControl") >= 0;
     }
 
     public GainControl getGainControl() {
@@ -204,10 +225,14 @@ public abstract class BDHandler implements Player, ServiceContentHandler {
 
     public long getMediaNanoseconds() {
         synchronized (this) {
+            long mediaTime;
             if ((state == Started) && (rate != 0.0f))
-                return baseMediaTime + (getTimeBase().getNanoseconds() - baseTime);
+                mediaTime = baseMediaTime + (getTimeBase().getNanoseconds() - baseTime);
             else
-                return baseMediaTime;
+                mediaTime = baseMediaTime;
+            maybeTraceMrDProbe(mediaTime);
+            maybeTraceMediaClockThreshold(mediaTime, "getMediaNanoseconds");
+            return mediaTime;
         }
     }
 
@@ -241,6 +266,14 @@ public abstract class BDHandler implements Player, ServiceContentHandler {
     protected void updateTime(Time now) {
         baseMediaTime = now.getNanoseconds();
         baseTime = getTimeBase().getNanoseconds();
+        resetMediaClockTrace();
+        BDJDebug.traceMediaClock(logger,
+                "updateTime class=" + getClass().getName() +
+                " locator=" + describeLocator() +
+                " mediaNs=" + baseMediaTime +
+                " state=" + state +
+                " rate=" + rate +
+                BDJDebug.callerSummary());
     }
 
     public float getRate() {
@@ -283,6 +316,14 @@ public abstract class BDHandler implements Player, ServiceContentHandler {
         if (isClosed) return;
 
         PlayerAction action = new PlayerAction(this, PlayerAction.ACTION_PREFETCH, null);
+        if (getClass().getName().equals("org.videolan.media.content.playlist.Handler")) {
+            System.err.println("TRACE playlistPrefetchRequest class=" + getClass().getName() +
+                               " locator=" + describeLocator() +
+                               " state=" + state +
+                               " thread=" + _traceThread() +
+                               " queue=" + commandQueue.debugState());
+        }
+        onPrefetchQueued();
         commandQueue.put(action);
     }
 
@@ -403,10 +444,25 @@ public abstract class BDHandler implements Player, ServiceContentHandler {
         return null;
     }
 
+    protected void onPrefetchQueued() {
+    }
+
+    protected void onPrefetchActionComplete(boolean success) {
+    }
+
     protected ControllerErrorEvent doStart(Time at) {
         if (at != null)
             baseMediaTime = at.getNanoseconds();
         baseTime = getTimeBase().getNanoseconds();
+        resetMediaClockTrace();
+        BDJDebug.traceMediaClock(logger,
+                "startClock class=" + getClass().getName() +
+                " locator=" + describeLocator() +
+                " atNs=" + (at == null ? -1L : at.getNanoseconds()) +
+                " baseMediaTime=" + baseMediaTime +
+                " baseTime=" + baseTime +
+                " state=" + state +
+                " rate=" + rate);
         return null;
     }
 
@@ -475,6 +531,7 @@ public abstract class BDHandler implements Player, ServiceContentHandler {
     }
 
     private boolean doPrefetchAction() {
+        boolean success = true;
         switch (state) {
         case Unrealized:
         case Realizing:
@@ -489,6 +546,8 @@ public abstract class BDHandler implements Player, ServiceContentHandler {
 
             if (!PlayerManager.getInstance().allocateResource(this)) {
                 notifyListeners(new ResourceUnavailableEvent(this));
+                success = false;
+                onPrefetchActionComplete(success);
                 return false;
             }
             ControllerErrorEvent error = doPrefetch();
@@ -497,6 +556,8 @@ public abstract class BDHandler implements Player, ServiceContentHandler {
                 notifyListeners(new PrefetchCompleteEvent(this, Prefetching, Prefetched, Prefetched));
             } else {
                 notifyListeners(error);
+                success = false;
+                onPrefetchActionComplete(success);
                 return false;
             }
             break;
@@ -504,6 +565,7 @@ public abstract class BDHandler implements Player, ServiceContentHandler {
             notifyListeners(new PrefetchCompleteEvent(this, state, state, state));
             break;
         }
+        onPrefetchActionComplete(success);
         return true;
     }
 
@@ -725,6 +787,77 @@ public abstract class BDHandler implements Player, ServiceContentHandler {
     boolean isClosed = false;
 
     protected BDJActionQueue commandQueue;
+
+    private void resetMediaClockTrace() {
+        mediaClockThresholdReached = false;
+        mediaClockLastMrDTraceNs = Long.MIN_VALUE;
+    }
+
+    private String describeLocator() {
+        try {
+            Locator[] locators = getServiceContentLocators();
+            if (locators != null && locators.length > 0 && locators[0] != null) {
+                return locators[0].toExternalForm();
+            }
+        } catch (Throwable t) {
+        }
+        return "<null>";
+    }
+
+    private static String _traceThread() {
+        Thread thread = Thread.currentThread();
+        if (thread == null || thread.getName() == null) {
+            return "<unknown>";
+        }
+        return thread.getName();
+    }
+
+    private void maybeTraceMediaClockThreshold(long mediaTime, String phase) {
+        long threshold = BDJDebug.mediaClockThresholdNs();
+        if (!BDJDebug.mediaClockEnabled() || threshold < 0 || mediaClockThresholdReached || mediaTime < threshold) {
+            return;
+        }
+        mediaClockThresholdReached = true;
+        BDJDebug.traceMediaClock(logger,
+                "thresholdReached class=" + getClass().getName() +
+                " locator=" + describeLocator() +
+                " phase=" + phase +
+                " thresholdNs=" + threshold +
+                " mediaNs=" + mediaTime +
+                " baseMediaTime=" + baseMediaTime +
+                " baseTime=" + baseTime +
+                " state=" + state +
+                " rate=" + rate +
+                BDJDebug.callerSummary());
+    }
+
+    private void maybeTraceMrDProbe(long mediaTime) {
+        if (!BDJDebug.mediaClockEnabled()) {
+            return;
+        }
+        if (!BDJDebug.callerContains("mr", "d")) {
+            return;
+        }
+        if (mediaClockLastMrDTraceNs != Long.MIN_VALUE &&
+                Math.abs(mediaTime - mediaClockLastMrDTraceNs) < 1000000000L) {
+            return;
+        }
+        mediaClockLastMrDTraceNs = mediaTime;
+        BDJDebug.traceMediaClock(logger,
+                "mrDProbe class=" + getClass().getName() +
+                " locator=" + describeLocator() +
+                " mediaNs=" + mediaTime +
+                " baseMediaTime=" + baseMediaTime +
+                " baseTime=" + baseTime +
+                " state=" + state +
+                " rate=" + rate +
+                BDJDebug.callerSummary());
+    }
+
+    private boolean mediaClockThresholdReached = false;
+    private long mediaClockLastMrDTraceNs = Long.MIN_VALUE;
+
+    private static final Logger logger = Logger.getLogger(BDHandler.class.getName());
 
     public static final double TO_SECONDS = 1 / 90000.0d;
     public static final double FROM_SECONDS = 90000.0d;

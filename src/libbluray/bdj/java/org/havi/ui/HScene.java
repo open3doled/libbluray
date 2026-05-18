@@ -19,13 +19,16 @@
 
 package org.havi.ui;
 
+import java.awt.AWTEvent;
 import java.awt.Component;
 import java.awt.Container;
 import java.awt.Dimension;
 import java.awt.Graphics;
 import java.awt.Rectangle;
 import java.awt.Image;
+import java.awt.event.FocusEvent;
 import java.awt.event.KeyEvent;
+import java.awt.event.KeyListener;
 import java.awt.event.WindowEvent;
 import java.awt.event.WindowListener;
 import java.util.Collections;
@@ -35,6 +38,7 @@ import java.util.Map;
 
 import org.havi.ui.event.HEventGroup;
 import org.videolan.BDJXletContext;
+import org.videolan.BDJDebug;
 import org.videolan.GUIManager;
 import org.videolan.Logger;
 import java.awt.BDToolkit;
@@ -54,6 +58,19 @@ public class HScene extends Container implements HComponentOrdering {
     }
 
     public void paint(Graphics g) {
+        BDJDebug.traceGraphics(logger,
+                               "HScene.paint scene@" +
+                               Integer.toHexString(System.identityHashCode(this)) +
+                               " graphics=" + (g == null ? "null" : g.getClass().getName()) +
+                               " visible=" + isVisible() +
+                               " active=" + active +
+                               " size=" + super.getWidth() + "x" + super.getHeight() +
+                               " components=" + getComponentCount() +
+                               " backgroundMode=" + describeBackgroundMode(backgroundMode) +
+                               " imageMode=" + describeImageMode(imageMode) +
+                               " image=" + describeImage(image) +
+                               BDJDebug.callerSummary());
+        traceChildren("paint");
         if (backgroundMode == BACKGROUND_FILL) {
             g.setColor(getBackground());
             g.fillRect(super.getX(), super.getY(), super.getWidth(), super.getHeight());
@@ -192,6 +209,10 @@ public class HScene extends Container implements HComponentOrdering {
     }
 
     protected void processWindowEvent(WindowEvent event) {
+        BDJDebug.traceScene(logger,
+                            "processWindowEvent scene@" +
+                            Integer.toHexString(System.identityHashCode(this)) +
+                            " event=" + event.getID());
         if (windowListener != null) {
             switch (event.getID()) {
             case WindowEvent.WINDOW_OPENED:
@@ -234,11 +255,86 @@ public class HScene extends Container implements HComponentOrdering {
 
         Component[] comps = getComponents();
         for (int i = 0; i < comps.length; i++) {
-            if (comps[i].hasFocus())
+            if (comps[i].hasFocus()) {
+                BDJDebug.traceScene(logger,
+                                    "getFocusOwner scene@" +
+                                    Integer.toHexString(System.identityHashCode(this)) +
+                                    " focusOwner=" + comps[i]);
                 return comps[i];
+            }
         }
 
+        BDJDebug.traceScene(logger,
+                            "getFocusOwner scene@" +
+                            Integer.toHexString(System.identityHashCode(this)) +
+                            " none active=" + active +
+                            " components=" + comps.length);
         return null;
+    }
+
+    public void requestFocus() {
+        BDJDebug.traceScene(logger,
+                            "requestFocus scene@" +
+                            Integer.toHexString(System.identityHashCode(this)) +
+                            " visible=" + isVisible() +
+                            " active=" + active);
+        super.requestFocus();
+        setActive(true);
+    }
+
+    public synchronized void addKeyListener(KeyListener listener) {
+        super.addKeyListener(listener);
+        BDJDebug.traceScene(logger,
+                            "addKeyListener scene@" +
+                            Integer.toHexString(System.identityHashCode(this)) +
+                            " listener=" + listener +
+                            " total=" + getKeyListeners().length);
+    }
+
+    protected void processEvent(AWTEvent event) {
+        if (event instanceof KeyEvent) {
+            KeyEvent keyEvent = (KeyEvent)event;
+            BDJDebug.traceScene(logger,
+                                "processEvent scene@" +
+                                Integer.toHexString(System.identityHashCode(this)) +
+                                " type=KeyEvent id=" + keyEvent.getID() +
+                                " code=" + keyEvent.getKeyCode() +
+                                " char=" + (int)keyEvent.getKeyChar() +
+                                " listeners=" + getKeyListeners().length +
+                                " active=" + active +
+                                " visible=" + isVisible() +
+                                " consumedBefore=" + keyEvent.isConsumed());
+            super.processEvent(event);
+            BDJDebug.traceScene(logger,
+                                "processEventDone scene@" +
+                                Integer.toHexString(System.identityHashCode(this)) +
+                                " type=KeyEvent id=" + keyEvent.getID() +
+                                " code=" + keyEvent.getKeyCode() +
+                                " consumedAfter=" + keyEvent.isConsumed());
+            return;
+        }
+
+        if (event instanceof FocusEvent) {
+            FocusEvent focusEvent = (FocusEvent)event;
+            BDJDebug.traceScene(logger,
+                                "processEvent scene@" +
+                                Integer.toHexString(System.identityHashCode(this)) +
+                                " type=FocusEvent id=" + focusEvent.getID() +
+                                " source=" + focusEvent.getSource());
+        }
+
+        super.processEvent(event);
+    }
+
+    public void repaint(long tm, int x, int y, int width, int height) {
+        BDJDebug.traceScene(logger,
+                            "repaint scene@" +
+                            Integer.toHexString(System.identityHashCode(this)) +
+                            " tm=" + tm +
+                            " rect=" + x + "," + y + " " + width + "x" + height +
+                            " visible=" + isVisible() +
+                            " active=" + active);
+        super.repaint(tm, x, y, width, height);
     }
 
     public synchronized void dispose() {
@@ -365,11 +461,21 @@ public class HScene extends Container implements HComponentOrdering {
     }
 
     public void setActive(boolean focus) {
-        if (active == true && focus == false)
-            dispatchEvent(new WindowEvent(GUIManager.getInstance(),
-                    WindowEvent.WINDOW_DEACTIVATED));
+        BDJDebug.traceScene(logger,
+                            "setActive scene@" +
+                            Integer.toHexString(System.identityHashCode(this)) +
+                            " focus=" + focus +
+                            " wasActive=" + active);
+        if (active == focus)
+            return;
 
-        active = focus;
+        if (focus == true) {
+            processWindowEvent(new WindowEvent(GUIManager.getInstance(),
+                    WindowEvent.WINDOW_ACTIVATED));
+        } else {
+            processWindowEvent(new WindowEvent(GUIManager.getInstance(),
+                    WindowEvent.WINDOW_DEACTIVATED));
+        }
     }
 
     public void setKeyEvents(HEventGroup eventGroup) {
@@ -380,9 +486,27 @@ public class HScene extends Container implements HComponentOrdering {
         return eventGroup;
     }
 
+    protected void addImpl(Component comp, Object constraints, int index) {
+        super.addImpl(comp, constraints, index);
+        BDJDebug.traceScene(logger,
+                            "addImpl scene@" +
+                            Integer.toHexString(System.identityHashCode(this)) +
+                            " child=" + describeComponent(comp) +
+                            " index=" + index +
+                            " count=" + getComponentCount());
+        traceChildren("addImpl");
+    }
+
     public void setVisible(boolean visible) {
         if (visible == isVisible())
             return;
+        BDJDebug.traceScene(logger,
+                            "setVisible scene@" +
+                            Integer.toHexString(System.identityHashCode(this)) +
+                            " visible=" + visible +
+                            " wasVisible=" + isVisible() +
+                            " bounds=" + getX() + "," + getY() + " " +
+                            getWidth() + "x" + getHeight());
         super.setVisible(visible);
 
         /*
@@ -400,8 +524,163 @@ public class HScene extends Container implements HComponentOrdering {
         }
         */
 
-        if (visible)
+        if (visible) {
             GUIManager.getInstance().setVisible(visible);
+            BDJDebug.traceScene(logger,
+                                "setVisible scene@" +
+                                Integer.toHexString(System.identityHashCode(this)) +
+                                " guiVisible=" + GUIManager.getInstance().isVisible() +
+                                " components=" + getComponentCount());
+            traceChildren("setVisible");
+            repaint();
+        }
+    }
+
+    private void traceChildren(String origin) {
+        if (!BDJDebug.graphicsEnabled() && !BDJDebug.sceneEnabled()) {
+            return;
+        }
+        traceChildren(origin, this, 0);
+    }
+
+    private void traceChildren(String origin, Container parent, int depth) {
+        Component[] comps = parent.getComponents();
+        for (int i = 0; i < comps.length; i++) {
+            Component child = comps[i];
+            int childCount = (child instanceof Container) ?
+                             ((Container) child).getComponentCount() : 0;
+            BDJDebug.traceGraphics(logger,
+                                   "HScene.children origin=" + origin +
+                                   " scene@" +
+                                   Integer.toHexString(System.identityHashCode(this)) +
+                                   " depth=" + depth +
+                                   " parent=" + parent.getClass().getName() +
+                                   "@" + Integer.toHexString(System.identityHashCode(parent)) +
+                                   " index=" + i +
+                                   " childCount=" + childCount +
+                                   " child=" + describeComponent(child));
+            if (depth < 3 && childCount > 0) {
+                traceChildren(origin, (Container) child, depth + 1);
+            }
+        }
+    }
+
+    private static String describeComponent(Component comp) {
+        if (comp == null) {
+            return "null";
+        }
+        StringBuilder sb = new StringBuilder();
+        sb.append(comp.getClass().getName())
+          .append("@")
+          .append(Integer.toHexString(System.identityHashCode(comp)))
+          .append(" visible=").append(comp.isVisible())
+          .append(" showing=").append(comp.isShowing())
+          .append(" enabled=").append(comp.isEnabled())
+          .append(" bounds=").append(comp.getX()).append(",").append(comp.getY())
+          .append(" ").append(comp.getWidth()).append("x").append(comp.getHeight())
+          .append(" chain=").append(describeClassChain(comp.getClass()));
+        String name = comp.getName();
+        if (name != null) {
+            sb.append(" name=").append(name);
+        }
+        if (comp instanceof HVisible) {
+            HVisible visible = (HVisible)comp;
+            sb.append(" look=").append(visible.getLook())
+              .append(" state=").append(visible.getInteractionState());
+        }
+        String childSummary = describeChildSnapshot(comp);
+        if (childSummary != null) {
+            sb.append(" children=").append(childSummary);
+        }
+        return sb.toString();
+    }
+
+    private static String describeClassChain(Class clazz) {
+        if (clazz == null) {
+            return "null";
+        }
+        StringBuilder sb = new StringBuilder();
+        int depth = 0;
+        while (clazz != null && depth < 6) {
+            if (depth > 0) {
+                sb.append("<-");
+            }
+            sb.append(clazz.getName());
+            clazz = clazz.getSuperclass();
+            depth++;
+        }
+        return sb.toString();
+    }
+
+    private static String describeChildSnapshot(Component comp) {
+        if (!(comp instanceof Container)) {
+            return null;
+        }
+
+        Container container = (Container)comp;
+        int count = container.getComponentCount();
+        if (count <= 0) {
+            return "0";
+        }
+
+        StringBuilder sb = new StringBuilder();
+        sb.append(count);
+        int limit = Math.min(count, 4);
+        for (int i = 0; i < limit; i++) {
+            Component child = container.getComponent(i);
+            sb.append(i == 0 ? "[" : ";");
+            sb.append(child.getClass().getName())
+              .append("@").append(Integer.toHexString(System.identityHashCode(child)))
+              .append(" bounds=").append(child.getX()).append(",").append(child.getY())
+              .append(" ").append(child.getWidth()).append("x").append(child.getHeight())
+              .append(" visible=").append(child.isVisible());
+            String childName = child.getName();
+            if (childName != null) {
+                sb.append(" name=").append(childName);
+            }
+        }
+        if (count > 0) {
+            sb.append("]");
+        }
+        if (count > limit) {
+            sb.append("+").append(count - limit).append("more");
+        }
+        return sb.toString();
+    }
+
+    private static String describeImage(Image image) {
+        if (image == null) {
+            return "null";
+        }
+        return image.getClass().getName() + "@" +
+               Integer.toHexString(System.identityHashCode(image)) +
+               " size=" + image.getWidth(null) + "x" + image.getHeight(null);
+    }
+
+    private static String describeImageMode(int mode) {
+        switch (mode) {
+        case IMAGE_NONE:
+            return "none";
+        case IMAGE_STRETCH:
+            return "stretch";
+        case IMAGE_CENTER:
+            return "center";
+        case IMAGE_TILE:
+            return "tile";
+        default:
+            return "unknown(" + mode + ")";
+        }
+    }
+
+    private static String describeBackgroundMode(int mode) {
+        switch (mode) {
+        case NO_BACKGROUND_FILL:
+            return "none";
+        case BACKGROUND_FILL:
+            return "fill";
+        default:
+            return "unknown(" + mode + ")";
+        }
     }
 
     public int getBackgroundMode() {
@@ -409,10 +688,21 @@ public class HScene extends Container implements HComponentOrdering {
     }
 
     public void setBackgroundMode(int mode) {
+        BDJDebug.traceGraphics(logger,
+                               "HScene.setBackgroundMode scene@" +
+                               Integer.toHexString(System.identityHashCode(this)) +
+                               " old=" + describeBackgroundMode(backgroundMode) +
+                               " new=" + describeBackgroundMode(mode) +
+                               BDJDebug.callerSummary());
         this.backgroundMode = mode;
     }
 
     public void setBackgroundImage(Image image) {
+        BDJDebug.traceGraphics(logger,
+                               "HScene.setBackgroundImage scene@" +
+                               Integer.toHexString(System.identityHashCode(this)) +
+                               " image=" + describeImage(image) +
+                               BDJDebug.callerSummary());
         this.image = image;
     }
 
@@ -421,6 +711,12 @@ public class HScene extends Container implements HComponentOrdering {
     }
 
     public boolean setRenderMode(int mode) {
+        BDJDebug.traceGraphics(logger,
+                               "HScene.setRenderMode scene@" +
+                               Integer.toHexString(System.identityHashCode(this)) +
+                               " old=" + describeImageMode(imageMode) +
+                               " new=" + describeImageMode(mode) +
+                               BDJDebug.callerSummary());
         this.imageMode = mode;
         return true;
     }

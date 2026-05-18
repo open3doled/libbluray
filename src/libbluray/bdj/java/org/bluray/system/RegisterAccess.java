@@ -18,6 +18,7 @@
  */
 package org.bluray.system;
 
+import org.videolan.BDJDebug;
 import org.videolan.Libbluray;
 import org.videolan.Logger;
 
@@ -35,7 +36,11 @@ public class RegisterAccess {
             throw new IllegalArgumentException("GPR " + num + " is not supported.");
         }
 
-        return Libbluray.readGPR(num);
+        int value = Libbluray.readGPR(num);
+        traceMenuBranchGprAccess("read", num, value, value);
+        traceSelectedGprAccess("read", num, value);
+        traceBootFlagAccess("read", num, value);
+        return value;
     }
 
     public int getPSR(int num) {
@@ -44,7 +49,9 @@ public class RegisterAccess {
             throw new IllegalArgumentException("PSR " + num + " is not supported.");
         }
 
-        return Libbluray.readPSR(num);
+        int value = Libbluray.readPSR(num);
+        traceS3DPsrAccess("read", num, value);
+        return value;
     }
 
     public void setGPR(int num, int value) {
@@ -52,7 +59,86 @@ public class RegisterAccess {
             logger.error("setGPR(" + num + ", " + value + "): invalid GPR");
             throw new IllegalArgumentException("GPR " + num + " is not supported.");
         }
+        int oldValue = Libbluray.readGPR(num);
+        traceMenuBranchGprAccess("write", num, oldValue, value);
+        traceSelectedGprAccess("write", num, value);
+        traceBootFlagAccess("write", num, value);
         Libbluray.writeGPR(num, value);
+    }
+
+    private static void traceMenuBranchGprAccess(String op, int num, int oldValue, int newValue) {
+        if (!isMenuBranchGpr(num)) {
+            return;
+        }
+        logger.error("TRACE menuBranchGpr gpr=" + num +
+                     " op=" + op +
+                     " value=" + newValue +
+                     " old=" + oldValue +
+                     " thread=" + Thread.currentThread().getName() +
+                     BDJDebug.callerSummary());
+    }
+
+    private static boolean isMenuBranchGpr(int num) {
+        return num == 100 || num == 104 || num == 105 || num == 110;
+    }
+
+    private static void traceSelectedGprAccess(String op, int num, int value) {
+        if (BDJDebug.tracedGprNum() != num) {
+            return;
+        }
+        BDJDebug.traceRegister(
+                logger,
+                "gpr" + num + " " + op + " value=" + value +
+                " thread=" + Thread.currentThread().getName() +
+                BDJDebug.callerSummary());
+    }
+
+    private static void traceBootFlagAccess(String op, int num, int value) {
+        if (!BDJDebug.lifecycleEnabled() || num != TRACE_GPR_BOOT_FLAG) {
+            return;
+        }
+        BDJDebug.traceLifecycle(
+                logger,
+                "gpr1889 " + op + " value=" + value +
+                " thread=" + Thread.currentThread().getName() +
+                BDJDebug.callerSummary());
+    }
+
+    private static void traceS3DPsrAccess(String op, int num, int value) {
+        if (!isS3DPsr(num)) {
+            return;
+        }
+        logger.error("TRACE s3d-psr psr=" + num +
+                     " name=" + describePsr(num) +
+                     " op=" + op +
+                     " value=0x" + Integer.toHexString(value) +
+                     " thread=" + Thread.currentThread().getName() +
+                     BDJDebug.callerSummary());
+    }
+
+    private static boolean isS3DPsr(int num) {
+        return num == PSR_OUTPUT_MODE_PREFERENCE ||
+               num == PSR_3D_STATUS ||
+               num == PSR_DISPLAY_CAPABILITY ||
+               num == PSR_3D_CAPABILITY ||
+               num == PSR_PLAYER_PROFILE;
+    }
+
+    private static String describePsr(int num) {
+        switch (num) {
+        case PSR_OUTPUT_MODE_PREFERENCE:
+            return "OUTPUT_MODE_PREFERENCE";
+        case PSR_3D_STATUS:
+            return "3D_STATUS";
+        case PSR_DISPLAY_CAPABILITY:
+            return "DISPLAY_CAPABILITY";
+        case PSR_3D_CAPABILITY:
+            return "3D_CAPABILITY";
+        case PSR_PLAYER_PROFILE:
+            return "PLAYER_PROFILE";
+        default:
+            return "psr" + num;
+        }
     }
 
     public static final int PSR_AUDIO_STN = 1;
@@ -73,10 +159,15 @@ public class RegisterAccess {
     public static final int PSR_MENU_DESCR_LANG_CODE = 18;
     public static final int PSR_COUNTRY_CODE = 19;
     public static final int PSR_REGION_PLAYBACK_CODE = 20;
+    public static final int PSR_OUTPUT_MODE_PREFERENCE = 21;
+    public static final int PSR_3D_STATUS = 22;
+    public static final int PSR_DISPLAY_CAPABILITY = 23;
+    public static final int PSR_3D_CAPABILITY = 24;
 
     public static final int PSR_VIDEO_CAPABILITY = 29;
     public static final int PSR_PLAYER_CAP_TXTST = 30;
     public static final int PSR_PLAYER_PROFILE = 31;
+    private static final int TRACE_GPR_BOOT_FLAG = 1889;
 
     private static final RegisterAccess instance = new RegisterAccess();
 
